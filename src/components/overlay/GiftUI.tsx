@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { COPY } from '../../config/copy';
+import { COPY, prompt } from '../../config/copy';
 import { useUIStore } from '../../state/useUIStore';
+import { useViewport } from '../../hooks/useViewport';
 
 /**
  * Scene 1's only instruction: a line of text and a button that bobs.
@@ -10,6 +11,7 @@ import { useUIStore } from '../../state/useUIStore';
  */
 export function GiftUI({ onOpen }: { onOpen: () => void }): React.ReactElement {
   const opened = useUIStore((s) => s.opened);
+  const { coarse } = useViewport();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export function GiftUI({ onOpen }: { onOpen: () => void }): React.ReactElement {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        padding: '0 24px 9vh',
+        padding: '0 24px calc(env(safe-area-inset-bottom, 0px) + 9dvh)',
         textAlign: 'center',
         gap: 14,
       }}
@@ -69,7 +71,7 @@ export function GiftUI({ onOpen }: { onOpen: () => void }): React.ReactElement {
           borderRadius: 999,
         }}
       >
-        {COPY.giftButton}
+        {prompt('giftButton', coarse)}
       </button>
     </div>
   );

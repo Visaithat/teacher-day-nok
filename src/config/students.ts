@@ -40,13 +40,17 @@ export type Doodle = 'robot' | 'palette' | 'bug' | 'flask' | 'sprout';
 /**
  * The handwritten note on the back of the panel photo.
  *
- * TODO(you): the memories in `body` are written, not remembered — they are
- * plausible for each student's subject and nothing more. Swap in the real
- * ones; that is the whole point of the card. `wish` is the blessing the
- * letter closes on, and is signed with the student's own name automatically.
+ * All five are the students' own, in Lao, copied in as they wrote them. `wish`
+ * is the line the letter closes on, and is signed with the student's own name
+ * automatically.
  */
 export interface Letter {
-  /** Two short paragraphs. Keep them short — the card does not scroll. */
+  /** The opening line, if the student wrote their own. Defaults to "Dear Teacher,". */
+  readonly greeting?: string;
+  /**
+   * The paragraphs. The card does not scroll; a long letter is set smaller
+   * until it fits (see `LetterCard`), so the shorter the bigger.
+   */
   readonly body: readonly string[];
   /** The last line: the blessing. */
   readonly wish: string;
@@ -134,6 +138,20 @@ export interface StudentConfig {
   readonly dayLabelSide?: 'left' | 'right';
 
   /**
+   * Scene 7: nudge this student's callout up, as a fraction of frame height.
+   *
+   * Portrait only - it moves a row of the ladder, and the ladder is the layout
+   * a tall frame uses. The wide frame's elbow solver picks its own spot out of
+   * 78 candidates and has no row to nudge.
+   *
+   * Positive is up. It is applied before the row is clamped into its half of
+   * the frame, so it can never push a message into the band reserved for the
+   * closing card - ask for more lift than there is room for and you simply get
+   * all there was.
+   */
+  readonly dayLabelLift?: number;
+
+  /**
    * Scene 7: extra forward tilt over the lens, in radians, on top of the
    * ring's shared 0.34 (about 19 degrees). Omit for none.
    *
@@ -153,6 +171,59 @@ export interface StudentConfig {
    * edge. Kengkue at 0.66 is the closest face in the film.
    */
   readonly dayRadius?: number;
+
+  /**
+   * Scene 7 seat on a PORTRAIT frame. Omit to keep the wide-frame seat.
+   *
+   * The finale is the one shot in the film that cannot be rescued by the lens.
+   * The camera lies at the centre of the ring, so a head's distance from it is
+   * set by body height and lean alone - `dayRadius` never enters it. That has
+   * two consequences: a head's size on screen depends only on the fov, and
+   * every seat sits 25 to 44 degrees off the optical axis. A portrait frame at
+   * fov 74 sees +/-19 degrees horizontally, so four of the five are simply
+   * outside it, which is the limitation `PERFORMANCE.md` recorded and left as
+   * an art decision.
+   *
+   * Neither knob alone closes it. A lens wide enough to hold the authored ring
+   * is fov 133 - a peephole. Scaling the ring up cannot work at all: `ndc.x`
+   * tends to a limit of 2.27 for the widest seat, so it never reaches the
+   * frame however large the ring gets. Scaling it down to 0.4 does fit, and
+   * puts the whole class inside a 0.8 m circle around your head.
+   *
+   * So portrait is a SECOND SHOT, and these are its seats - solved by
+   * inverting the projection from where each face should land in the frame,
+   * because that is the way round this ring was art-directed in the first
+   * place. Kengkue sits at bottom centre; the other four climb the frame in a
+   * stagger rather than a mirror-symmetric ring, which is what trades
+   * horizontal off-axis angle for the vertical room a tall frame has going
+   * spare.
+   *
+   * The radii were re-solved once already. The first set framed the FACES
+   * correctly and still looked terrible, because a face was never what filled
+   * the screen - the hips sit three times nearer the lens than the heads, so
+   * one student's shoulders covered 283% of the frame width. The fix was to
+   * raise the whole ring (`RING_LIFT_NARROW` in `DayScene.tsx`); these radii
+   * are the same composition re-solved at that new distance, which is why they
+   * are all roughly 1.8x their first values and the NDC targets are unchanged.
+   *
+   * They were solved a THIRD time to get out from behind the closing card.
+   * `Finale.tsx` puts "Happy Teacher's Day!" across the middle of the frame,
+   * and on a phone that block is nearly the full width - so Vanhxay, sitting
+   * at NDC y -0.02, was dead centre behind the lettering, with Timmy and Nina
+   * partly under it too. The film's own intent (see the header of
+   * `FloatingLines.tsx`) is five faces around a clear gap in the middle, and
+   * the wide shot gets that gap from the ring's geometry for free. Portrait
+   * has to be told: the band is |ndc.y| < 0.379, a face is 0.082 of NDC tall,
+   * so every seat is placed past 0.461. Three across the bottom, two across
+   * the top.
+   *
+   * Composed against `DAY_FOV_NARROW` (96) at aspect 0.462, with the ring
+   * lifted 2.6 m. Change either of those without re-solving these and every
+   * face moves - `_finale.mjs` is what catches it.
+   */
+  readonly dayAngleNarrow?: number;
+  /** Scene 7 portrait radius, as a multiple of the base 3.9 m. */
+  readonly dayRadiusNarrow?: number;
 
   /** The reference avatar the appearance was traced from. Never rendered. */
   readonly ref?: string;
@@ -184,11 +255,14 @@ export const STUDENTS: readonly StudentConfig[] = [
     photo: 'uploads/timmy_photo.jpg',
     panelPhoto: 'uploads/timmy_panel.jpg',
     letter: {
+      greeting: 'ເຖິງ Teacher Nok ແລະ ອາຈານທຸກໆຄົນ ❤️',
       body: [
-        'You never told me a question was stupid. You just said go and find out — and then stayed late while I did.',
-        'I teach machines to learn for a living now. None of them learn the way you taught me to.',
+        'ຫຼານຢາກຂອບໃຈອາຈານທຸກຄົນສຳລັບທຸກໆຄຳສອນ, ຄຳແນະນຳ ແລະ ຄວາມຫ່ວງໃຍ. ທຸກສິ່ງທີ່ອາຈານເຄີຍສອນ ໄດ້ຄ່ອຍໆຫຼໍ່ຫຼອມໃຫ້ຫຼານມາຮອດຈຸດນີ້.',
+        'ມື້ນີ້ ຫຼານໄດ້ເຮັດໜຶ່ງໃນເປົ້າໝາຍສຳຄັນຂອງຊີວິດສຳເລັດ ຄື ການໄດ້ຮັບທຶນໄປຮຽນຕໍ່. ເວັບໄຊນ້ອຍໆທີ່ຫຼານສ້າງນີ້ ຈຶ່ງຢາກໃຫ້ເປັນຂອງຂວັນນ້ອຍໆ ແທນຄຳຂອບໃຈຈາກໃຈ ❤️',
+        'ເຖິງຕໍ່ໄປພວກເຮົາອາດຈະບໍ່ໄດ້ພົບກັນເລື້ອຍໆ ແຕ່ບໍ່ວ່າຫຼານຈະໄປຢູ່ໃສ ຫຼານຈະຈື່ສະເໝີວ່າ ຫຼານແມ່ນດາວດວງໜຶ່ງຈາກໂຮງຮຽນດາວດວງນ້ອຍ ⭐️ ແລະຈະພະຍາຍາມເປັ່ງແສງໃຫ້ດີທີ່ສຸດ!',
+        'ຂອບໃຈອາຈານທຸກຄົນສຳລັບທຸກຢ່າງ. ຂໍໃຫ້ອາຈານທຸກຄົນສຸຂະພາບແຂງແຮງ, ມີຄວາມສຸກ ແລະ ຢູ່ດີມີແຮງໄປດົນໆເດີ ❤️',
       ],
-      wish: 'May every year ahead be as patient with you as you were with me.',
+      wish: 'Love Love ອາຈານທຸກຄົນ! 😂❤️',
     },
     hand: 'patrick',
     doodle: 'robot',
@@ -196,8 +270,12 @@ export const STUDENTS: readonly StudentConfig[] = [
     lodUrl: 'uploads/timmy_lod.glb',
     dayModelUrl: 'uploads/timmy_day.glb',
     dayAngle: 72.811,
+    dayAngleNarrow: 24.02,
+    dayRadiusNarrow: 1.224,
     // He stands left of centre, so his line would default to leaving left.
     dayLabelSide: 'right',
+    // Asked for: his line sat low against the frame edge.
+    dayLabelLift: 0.05,
     // ADDED: aiProps was written for him but never wired up in the source.
     props: 'ai',
     ref: 'uploads/pasted-1788861151353-0.png',
@@ -218,11 +296,14 @@ export const STUDENTS: readonly StudentConfig[] = [
     photo: 'uploads/kengkue_photo.jpg',
     panelPhoto: 'uploads/kengkue_panel.jpg',
     letter: {
+      greeting: 'ເຖິງ Teacher Nok ແລະ ອາຈານທຸກໆຄົນ ❤️',
       body: [
-        'You caught me drawing in the margins of my maths book. You did not take it away — you asked me what it was.',
-        'That was the first time anyone called it art instead of a mess. I have not stopped since.',
+        'ຕອນນີ້ ຫຼານກຳລັງເດີນຕາມເປົ້າໝາຍຂອງຫຼານຢູ່ທີ່ປະເທດຈີນ. ເຖິງບາງຄັ້ງມັນຈະຍາກ ແລະ ມີຫຼາຍອຸປະສັກ ແຕ່ຫຼານຈະບໍ່ຍອມແພ້ ແລະ ຈະພະຍາຍາມເດີນຕໍ່ໄປໃຫ້ເຖິງຄວາມຝັນ.',
+        'ຈາກສ່ວນເລິກຂອງຫົວໃຈ ຫຼານຢາກຂອບໃຈອາຈານທຸກຄົນ ສຳລັບຄຳສອນ, ຄຳແນະນຳ ແລະ ທຸກໆສິ່ງທີ່ອາຈານເຄີຍມອບໃຫ້. ຖ້າບໍ່ມີອາຈານ ຫຼານອາດຈະບໍ່ໄດ້ມາຮອດຈຸດນີ້.',
+        'ຂໍໃຫ້ອາຈານທຸກຄົນສຸຂະພາບແຂງແຮງ, ມີຄວາມສຸກ, ສອນນັກຮຽນແບບມີຄວາມສຸກ ແລະ ຢ່າລືມພັກຜ່ອນກັນແດ່ເດີ 😂❤️',
+        'ຂອບໃຈສຳລັບທຸກຢ່າງ. ຫຼານຈະພະຍາຍາມເຮັດໃຫ້ອາຈານພູມໃຈໃນຕົວຫຼານ. ❤️',
       ],
-      wish: 'May your days stay as full of colour as the ones you gave us.',
+      wish: 'ຮັກອາຈານທຸກຄົນເດີ້',
     },
     hand: 'caveat',
     doodle: 'palette',
@@ -230,6 +311,8 @@ export const STUDENTS: readonly StudentConfig[] = [
     lodUrl: 'uploads/kengkue_lod.glb',
     dayModelUrl: 'uploads/kengkue_day.glb',
     dayAngle: 0.811,
+    dayAngleNarrow: 0.0,
+    dayRadiusNarrow: 1.556,
     dayRadius: 0.66,
     // He is the closest face in the film; tipping him further over the lens is
     // what makes him read as leaning right down into it.
@@ -257,11 +340,14 @@ export const STUDENTS: readonly StudentConfig[] = [
     photo: 'uploads/vanhxay_photo.jpg',
     panelPhoto: 'uploads/vanhxay_panel.jpg',
     letter: {
+      greeting: 'ເຖິງ Teacher Nok ແລະ ອາຈານທຸກໆຄົນ ❤️',
       body: [
-        'I broke the school computer twice. Both times you sat down beside me and made me find the fault myself.',
-        'That is still exactly how I work: find what is broken, stay until it runs.',
+        'ຈິງໆແລ້ວ ຫຼານບໍ່ຄ່ອຍເກັ່ງໃນການເວົ້າຄວາມຮູ້ສຶກ 😅 ແຕ່ຄັ້ງນີ້ຢາກຈະບອກອາຈານຈາກໃຈວ່າ ຂອບໃຈຫຼາຍໆ.',
+        'ຂອບໃຈອາຈານທີ່ຄອຍແນະນຳ, ຄອຍຊີ້ທາງ ແລະ ໃຫ້ຄຳແນະນຳດີໆກັບຫຼານຢູ່ຫຼາຍຄັ້ງ. ບາງຄຳແນະນຳອາດເປັນພຽງຄຳເວົ້າສັ້ນໆສຳລັບອາຈານ ແຕ່ສຳລັບຫຼານ ມັນກັບເປັນສິ່ງທີ່ຫຼານຈື່ໄວ້ໄດ້ດົນ.',
+        'ຫຼານດີໃຈຫຼາຍທີ່ເຄີຍໄດ້ເປັນສ່ວນໜຶ່ງຂອງ ໂຮງຮຽນດາວດວງນ້ອຍ. ມັນເປັນບ່ອນທີ່ຫຼານໄດ້ຮຽນຮູ້ຫຼາຍຢ່າງ ບໍ່ແມ່ນພຽງແຕ່ຈາກປຶ້ມ ແຕ່ຍັງໄດ້ຮຽນຈາກຄົນຮອບຂ້າງ ແລະ ຈາກອາຈານທຸກຄົນ.',
+        'ສຸດທ້າຍ ຫຼານຂໍໃຫ້ອາຈານທຸກຄົນມີຮອຍຍິ້ມຫຼາຍໆໃນທຸກໆມື້, ມີລູກສິດດີໆທີ່ບໍ່ເຮັດໃຫ້ປວດຫົວ 😂 ແລະ ຂໍໃຫ້ທຸກໆວັນຂອງອາຈານເຕັມໄປດ້ວຍຄວາມສຸກ.',
       ],
-      wish: 'May everything in your life run clean, and nothing you love ever crash.',
+      wish: 'ຮັກອາຈານທຸກໆຄົນສະເໝີເດີ້ ❤️',
     },
     hand: 'indie',
     doodle: 'bug',
@@ -269,8 +355,12 @@ export const STUDENTS: readonly StudentConfig[] = [
     lodUrl: 'uploads/vanhxay_lod.glb',
     dayModelUrl: 'uploads/vanhxay_day.glb',
     dayAngle: 288.811,
+    dayAngleNarrow: 335.20,
+    dayRadiusNarrow: 1.230,
     // He stands right of centre, so his line would default to leaving right.
     dayLabelSide: 'left',
+    // Asked for: his line sat below his own face rather than beside it.
+    dayLabelLift: 0.05,
     // near-black outfit: same rim treatment as Kengkue
     rimBoost: 1.6,
     // gold emblems are the only thing separating him from the dark street
@@ -297,10 +387,10 @@ export const STUDENTS: readonly StudentConfig[] = [
     panelPhoto: 'uploads/namthip_panel.jpg',
     letter: {
       body: [
-        'You let me keep a jar of pond water on the windowsill for a month, just to see whether anything would grow in it.',
-        'Something did. I have been looking down a microscope ever since, and it still feels the same.',
+        'ສຸກສັນວັນຄູເນີ້ເຊີ້ ຂໍອວຍພອນໃຫ້ເຊີ້ແລະຄູອາຈານທຸກຄົນມີສຸຂະພາບແຂງແຮງ, ສຸກສົມຫວັງກັບສິ່ງທີ່ຕ້ອງການ.',
+        'ພວກຫຼານກໍກຳລັງອອກໄປໃຊ້ຊີວິດ, ໄປຊອກຮູ້ປະສົບການໃຫ້ຕົນເອງ, ໄດ້ພົບເຈີກັບຜູ້ຄົນທີ່ຫຼາກຫຼາຍ ແຕ່ກະຫວັງວ່າພວກເຮົາຈະໄດ້ໄປກິນຊີ້ນດາດພ້ອມໜ້າພ້ອມຕາກັນໄວໆນີ້ເດີ້ເຊີ້ 😆',
       ],
-      wish: 'May you keep finding small wonderful things, the way you taught us to.',
+      wish: 'ຫວັງວ່າອາຈານທຸກຄົນຈະຍັງສະບາຍດີ, ແຂງແຮງ, ມ່ວນຊື່ນກັບນ້ອງໆນັກຮຽນສະເໝີມາ 🫶',
     },
     hand: 'shadows',
     doodle: 'flask',
@@ -308,6 +398,8 @@ export const STUDENTS: readonly StudentConfig[] = [
     lodUrl: 'uploads/namthip_lod.glb',
     dayModelUrl: 'uploads/namthip_day.glb',
     dayAngle: 216.811,
+    dayAngleNarrow: 196.27,
+    dayRadiusNarrow: 1.523,
     dayRadius: 0.82,
     // ADDED: researcherProps was written for her but never wired up.
     props: 'researcher',
@@ -331,11 +423,16 @@ export const STUDENTS: readonly StudentConfig[] = [
     photo: 'uploads/nina_photo.jpg',
     panelPhoto: 'uploads/nina_panel.jpg',
     letter: {
+      greeting: 'ເຖິງ Teacher Nok ແລະ ອາຈານທຸກໆຄົນ ❤️',
       body: [
-        'I was the loud one at the back. Instead of a punishment you handed me the class register to look after.',
-        'You were the first person who ever trusted me with something. I have built everything on that.',
+        'ກ່ອນອື່ນເລີຍ ຫຼານຢາກຂອບໃຈອາຈານສຳລັບທຸກໆຢ່າງທີ່ຜ່ານມາ. ທັງຄຳສອນ, ຄຳແນະນຳ, ຄວາມຫ່ວງໃຍ ແລະ ຄວາມຊົງຈຳດີໆ ທີ່ອາຈານເຄີຍມອບໃຫ້.',
+        'ຕອນນີ້ ຫຼານກຳລັງເດີນຕາມຄວາມຝັນຂອງຕົນເອງ ຄືການໄປຮຽນຕໍ່ຕ່າງປະເທດ ເຫມືອນກັບໝູ່ໆອີກຫຼາຍຄົນ. ອາດຈະມີທັງຄວາມຕື່ນເຕັ້ນ, ຄວາມກັງວົນ ແລະ ຄວາມຄິດຮອດ, ແຕ່ຫຼານກໍຈະພະຍາຍາມເດີນຕໍ່ໄປໃຫ້ດີທີ່ສຸດ.',
+        'ສິ່ງໜຶ່ງທີ່ຫຼານຮູ້ແນ່ນອນຄື ຫຼານຈະ ຄິດຮອດໂຮງຮຽນດາວດວງນ້ອຍ. ເພາະບ່ອນນີ້ບໍ່ແມ່ນພຽງໂຮງຮຽນທີ່ໃຫ້ຄວາມຮູ້ ແຕ່ເປັນບ່ອນທີ່ຄ່ອຍໆຫຼໍ່ຫຼອມຫຼານ ແລະ ເຮັດໃຫ້ຫຼານກາຍເປັນຫຼານໃນມື້ນີ້.',
+        'ບໍ່ວ່າຫຼານຈະໄປໄກປານໃດ ຫຼານຈະຍັງຈື່ຈຳອາຈານ ແລະ ຄວາມຊົງຈຳຢູ່ດາວດວງນ້ອຍສະເໝີ. ❤️',
+        'ຂໍໃຫ້ອາຈານທຸກຄົນມີແຕ່ສິ່ງດີໆເຂົ້າມາໃນຊີວິດ, ມີຄວາມສຸກກັບທຸກໆມື້ ແລະ ຂໍໃຫ້ອາຈານຍັງຄົງເປັນ “ຄົນຈຸດດາວ” ໃຫ້ນັກຮຽນຮຸ່ນຕໍ່ໆໄປອີກຫຼາຍໆຄົນເດີ ⭐️',
+        'ຂອບໃຈສຳລັບທຸກຢ່າງ.',
       ],
-      wish: 'May everything you gave away without counting come back to you twice over.',
+      wish: 'ຮັກ ແລະ ຄິດຮອດອາຈານທຸກຄົນ ❤️',
     },
     hand: 'gloria',
     doodle: 'sprout',
@@ -343,6 +440,8 @@ export const STUDENTS: readonly StudentConfig[] = [
     lodUrl: 'uploads/nina_lod.glb',
     dayModelUrl: 'uploads/nina_day.glb',
     dayAngle: 144.811,
+    dayAngleNarrow: 157.58,
+    dayRadiusNarrow: 1.211,
     dayRadius: 0.82,
     // ADDED: businessProps was written for her but never wired up.
     props: 'business',

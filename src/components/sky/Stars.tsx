@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useThree } from '@react-three/fiber';
 import {
   AdditiveBlending,
   BufferAttribute,
@@ -102,6 +103,8 @@ function buildGeometry(count: number): BufferGeometry {
 
 export function Stars({ starDensity = DEFAULT_PROPS.starDensity }: { starDensity?: number }) {
   const quality = useUIStore((s) => s.quality);
+  const gl = useThree((s) => s.gl);
+  const size = useThree((s) => s.size);
   const count = Math.round(QUALITY[quality].stars * starDensity);
 
   const geometry = useMemo(() => buildGeometry(count), [count]);
@@ -115,13 +118,29 @@ export function Stars({ starDensity = DEFAULT_PROPS.starDensity }: { starDensity
         uniforms: {
           uTime: { value: 0 },
           uOpacity: { value: 1 },
-          uDpr: { value: Math.min(window.devicePixelRatio, 2) },
+          // Set from the canvas below, not from the device. See the effect.
+          uDpr: { value: 1 },
         },
         vertexShader,
         fragmentShader,
       }),
     [],
   );
+
+  /**
+   * The canvas's pixel ratio, not the device's.
+   *
+   * This was `Math.min(window.devicePixelRatio, 2)`, memoised with an empty
+   * dependency list - so on a phone reporting a ratio of 3, where the quality
+   * ladder clamps the canvas to 1, every star was drawn at twice the size it
+   * was meant to be. A blown-out, confetti sky and a fill-rate bill, on
+   * exactly the devices least able to pay it. The tier can also change
+   * mid-film, which is the other half of why this cannot be read once.
+   */
+  useLayoutEffect(() => {
+    const u = material.uniforms['uDpr'];
+    if (u) u.value = gl.getPixelRatio();
+  }, [material, gl, quality, size]);
 
   const ref = useRef<Points>(null);
 

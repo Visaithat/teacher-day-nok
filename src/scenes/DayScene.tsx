@@ -28,6 +28,7 @@ import { useUpdate } from '../lib/updateBus';
 import { sstep } from '../lib/math';
 import { QUALITY } from '../config/quality';
 import { useUIStore } from '../state/useUIStore';
+import { DAY_FOV, DAY_FOV_NARROW, NARROW_ASPECT } from '../state/viewport';
 import { renderTargets } from './renderTargets';
 import { dayState, type DayChar } from './dayChars';
 import { frame as frameState, type FrameState } from '../state/frame';
@@ -38,7 +39,12 @@ const MODEL_TARGET_H = 3.42;
 
 /** Flat on your back on the grass, looking straight up. */
 const CAMERA_Y = 0.5;
-const CAMERA_FOV = 74;
+/**
+ * The authored lens. A portrait frame plays `DAY_FOV_NARROW` instead, against
+ * the roster's `dayAngleNarrow` seats — see the long note on that field, and
+ * the re-seating effect below.
+ */
+const CAMERA_FOV = DAY_FOV;
 
 // ---------------------------------------------------------------- the ring
 //
@@ -95,6 +101,36 @@ const HEAD_ABOVE_HIP = HEAD_LOCAL_Y - HIP_Y;
  * open is 0.71, and 0.71 + 0.28 = 0.99, so the ring is fully closed a shade
  * before the wake ramp ends; nobody is still travelling when the text lands.
  */
+/**
+ * How far the whole ring is raised on a portrait frame, in world metres.
+ *
+ * This is the ONLY lever that makes a figure smaller, and it took a bad shot
+ * to work that out. Two that look like they should work do not:
+ *
+ *  - `dayRadius` cannot resize a head. The lens sits at the centre of the
+ *    ring, so a head's distance from it is body height and lean alone. Radius
+ *    slides a face around the frame; it never scales it.
+ *  - Scaling the figures DOWN makes the heads bigger. At scale k the head sits
+ *    at 2.907k with the lens at 0.5, so the depth 2.907k - 0.5 shrinks faster
+ *    than the head does.
+ *
+ * What was actually filling a phone screen was never the heads: the hips are
+ * three times nearer the lens than the faces, and shoulders are 1.61 m across
+ * against a half-frame of 0.57 m at that depth - 283% of the frame width, per
+ * figure. Raising the ring 2.6 m puts faces at 35% of the width and shoulders
+ * at 85%, which is people leaning in over you with their bodies running off
+ * the edges, rather than a wall of uniform.
+ *
+ * Raised rather than dropping the camera, which is geometrically the same for
+ * the figures: the lawn is a `circleGeometry` at y=0 with a default `FrontSide`
+ * material, and putting the lens underneath it would leave the shot relying on
+ * backface culling to hide the ground. The feet go out of frame either way.
+ *
+ * `students.ts`'s `dayRadiusNarrow` table is solved against this number. Change
+ * one and the other has to be re-solved - `_finale.mjs` is what checks it.
+ */
+const RING_LIFT_NARROW = 2.6;
+
 const RING_ENTER_FROM = 2.4;
 const RING_ENTER_SPAN = 0.28;
 
@@ -143,6 +179,10 @@ export function DayScene(): React.ReactElement {
   const textures = useTextures();
   const size = useThree((s) => s.size);
   const mainCamera = useThree((s) => s.camera);
+  // Which of the two finale shots is live. `DayScene` already re-renders on
+  // `size`, so this costs nothing beyond the resize it was going to do anyway.
+  const narrow = size.width / Math.max(1, size.height) < NARROW_ASPECT;
+  const dayFov = narrow ? DAY_FOV_NARROW : CAMERA_FOV;
   const quality = useUIStore((s) => s.quality);
   const settings = QUALITY[quality];
 
@@ -180,11 +220,6 @@ export function DayScene(): React.ReactElement {
       dayState.camera = null;
     };
   }, [scene, camera]);
-
-  useLayoutEffect(() => {
-    camera.aspect = size.width / Math.max(1, size.height);
-    camera.updateProjectionMatrix();
-  }, [camera, size]);
 
   // ---------------------------------------------------------------- ring
   const ring = useMemo(() => {
@@ -252,6 +287,45 @@ export function DayScene(): React.ReactElement {
   // blocky stand-in because its GLB never arrived. Neither throws, and neither
   // is obvious on screen — the ring just looks a little empty on one side.
   const auditedRef = useRef(false);
+
+  /**
+   * Put the ring on the seats this frame shape calls for.
+   *
+   * Deliberately NOT part of the ring memo above. Rebuilding five rigs on a
+   * resize would throw away the finale models already attached to them; but
+   * the entrance ramp in the update loop re-derives `holder.position` from
+   * `c.angle` and `c.radius` every frame anyway, so re-seating is those two
+   * numbers plus the yaw, which is the one thing set once at build time.
+   */
+  useLayoutEffect(() => {
+    for (const c of ring.chars) {
+      const s = STUDENTS[c.index];
+      if (!s) continue;
+      const deg = (narrow ? s.dayAngleNarrow : undefined) ?? s.dayAngle;
+      const mul = (narrow ? s.dayRadiusNarrow : undefined) ?? s.dayRadius ?? 1;
+      c.angle = MathUtils.degToRad(deg);
+      c.radius = RING_BASE_RADIUS * mul;
+      c.holder.rotation.set(0, c.angle + Math.PI, 0);
+    }
+    // Everybody, further off. See the note on the constant: this is the only
+    // thing that changes how big a figure is on screen.
+    ring.root.position.y = narrow ? RING_LIFT_NARROW : 0;
+    // ...and on a phone, nobody at all. However the portrait seats were
+    // solved, five figures and five callouts on a 390px frame came out as a
+    // crowd around the closing card, so that frame plays the ending as the sky
+    // and the card alone; `FloatingLines` drops the callouts to match and
+    // `Finale` brings the card in early. The seats above are kept, so this is
+    // one line to undo.
+    ring.root.visible = !narrow;
+
+    // The shot changed, so the DEV audit should look at the new one.
+    auditedRef.current = false;
+
+    camera.aspect = size.width / Math.max(1, size.height);
+    camera.fov = dayFov;
+    camera.updateProjectionMatrix();
+  }, [camera, size, ring, narrow, dayFov]);
+
   const audit = useCallback(() => {
     if (auditedRef.current) return;
     auditedRef.current = true;
@@ -273,8 +347,13 @@ export function DayScene(): React.ReactElement {
     } else if (import.meta.env.DEV) {
       const probe = new Vector3();
       camera.updateMatrixWorld();
+      // The live values, not the authored ones: this log is the tool you tune
+      // the portrait seat table with, and it has to describe the shot on
+      // screen. `headNdc` is the head's CENTRE — a face is about 0.47 of NDC
+      // wide on a portrait frame, so read the margin, not just the sign.
       console.info(
-        `[finale] all ${seated} students rendered — fov ${CAMERA_FOV}, ` +
+        `[finale] all ${seated} students rendered — ${narrow ? 'portrait' : 'wide'} shot, ` +
+          `aspect ${camera.aspect.toFixed(3)}, fov ${camera.fov.toFixed(1)}, ` +
           `scale ${RING_SCALE}, base radius ${RING_BASE_RADIUS} m`,
         ring.chars.map((c) => {
           const pos = c.holder.position;
@@ -289,7 +368,7 @@ export function DayScene(): React.ReactElement {
         }),
       );
     }
-  }, [ring, camera]);
+  }, [ring, camera, narrow]);
 
   // Shadow casting is a per-mesh flag, so the quality tier can toggle it on
   // the figures that already exist rather than forcing a rebuild.
@@ -436,7 +515,7 @@ export function DayScene(): React.ReactElement {
   );
 
   // The finale petals are seen through the day camera.
-  useFieldPixelScale(petals.uniforms.uPixelScale, CAMERA_FOV);
+  useFieldPixelScale(petals.uniforms.uPixelScale, dayFov);
 
   // Unlit, and it has to stay that way. This is a radius-400 sphere rendered
   // from the inside, so a lit material would be multiplied by the hemisphere,
@@ -503,9 +582,14 @@ export function DayScene(): React.ReactElement {
       camera.up.set(Math.sin(time * 0.11) * 0.03, 0, -1);
       camera.lookAt(Math.sin(time * 0.13) * 0.4, 30, Math.cos(time * 0.1) * 0.4);
 
+      // Both together: a DPR-only change republishes the aspect without
+      // re-running the effect above, and a camera holding one shot's fov with
+      // the other shot's aspect is four students out of frame.
       const aspect = (mainCamera as PerspectiveCamera).aspect;
-      if (camera.aspect !== aspect) {
+      const wantFov = aspect < NARROW_ASPECT ? DAY_FOV_NARROW : CAMERA_FOV;
+      if (camera.aspect !== aspect || camera.fov !== wantFov) {
         camera.aspect = aspect;
+        camera.fov = wantFov;
         camera.updateProjectionMatrix();
       }
       if (domeRef.current) domeRef.current.rotation.y = time * 0.004;
@@ -520,7 +604,11 @@ export function DayScene(): React.ReactElement {
         // progress through that, and it scales the lean and the gestures too,
         // so somebody still travelling is not already posed.
         const e = sstep(c.enter, Math.min(1, c.enter + RING_ENTER_SPAN), wake);
-        const rad = c.radius + (1 - e) * RING_ENTER_FROM;
+        // A fixed 2.4 m run is most of a portrait seat's whole radius — the
+        // nearest student would start out at four times their final distance
+        // and the wake would read as a stampede rather than a gathering.
+        const enterFrom = Math.min(RING_ENTER_FROM, c.radius * 0.7);
+        const rad = c.radius + (1 - e) * enterFrom;
         c.holder.position.set(Math.sin(c.angle) * rad, 0, Math.cos(c.angle) * rad);
         r.grp.visible = e > 0.01;
 
@@ -593,8 +681,22 @@ export function DayScene(): React.ReactElement {
       <sprite material={flareMat} scale={[22, 22, 1]} position={[-3, 30, 6]} />
 
       <hemisphereLight args={['#cfe4ff', '#d3b58a', 1.2]} />
-      {/* At the lens, so the faces leaning in are lit from the viewer's side. */}
-      <pointLight color="#ffe6c4" intensity={7} distance={16} decay={2} position={[0, 0.8, 0]} />
+      {/*
+        At the lens, so the faces leaning in are lit from the viewer's side.
+
+        `decay: 2` is inverse-square, so this has to follow `RING_LIFT_NARROW`.
+        Raising the ring 2.6 m takes the faces from 3.28 m to 5.88 m, which is
+        31% of the light — so portrait needs MORE, not less. 7 × (5.88/3.28)²
+        ≈ 22. The old 1.8 was tuned when the portrait ring was nearer than the
+        wide one, and pointed the wrong way.
+      */}
+      <pointLight
+        color="#ffe6c4"
+        intensity={narrow ? 22 : 7}
+        distance={16}
+        decay={2}
+        position={[0, 0.8, 0]}
+      />
       <directionalLight color="#fff0d8" intensity={1.3} position={[0, -6, 0]} />
       <directionalLight
         color="#fff1d6"

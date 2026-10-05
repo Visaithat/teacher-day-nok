@@ -36,7 +36,7 @@ export function ChapterCaption(): React.ReactElement {
     }
 
     if (text) setText(textRef.current, text);
-    setStyle(wrapRef.current, 'top', low ? '76vh' : '7vh');
+    setStyle(wrapRef.current, 'top', low ? '76dvh' : '7dvh');
     setOpacity(wrapRef.current, strongest * (1 - f.panelStrength));
   }, []);
 
@@ -49,7 +49,7 @@ export function ChapterCaption(): React.ReactElement {
         position: 'absolute',
         left: 0,
         right: 0,
-        top: '7vh',
+        top: '7dvh',
         textAlign: 'center',
         opacity: 0,
         pointerEvents: 'none',

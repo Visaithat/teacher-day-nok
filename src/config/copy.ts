@@ -43,6 +43,8 @@ export const COPY = {
   /** Scene 4 */
   musicHint: 'Click to play music',
   nowPlaying: "Now playing · from the gate's music box",
+  /** ...and what fits in a phone corner beside the mute pill. */
+  nowPlayingShort: 'Now playing',
   gateSignTitle: 'THE CITY OF OUR DREAMS',
   gateSignSub: 'WELCOME HOME, TEACHER',
 
@@ -52,11 +54,36 @@ export const COPY = {
     'Every dream you watered has bloomed. Thank you for believing in us long before we believed in ourselves.',
   replay: 'Replay',
 
+  /** Scene 5 - the phone's way into a student's message. */
+  messageButton: 'Read the message from',
+  close: 'Close',
+
   /** Chrome */
   journeyLabel: 'THE JOURNEY',
   soundOn: 'Sound on',
   soundOff: 'Sound off',
 } as const;
+
+/**
+ * The same prompts, for a reader who is tapping rather than clicking.
+ *
+ * The film says "Click" three times, to an audience that on a phone has no
+ * mouse to click with. Only the English chrome is swapped; the letters, the
+ * Lao finale lines and everything else are untouched.
+ *
+ * `letterHint` also loses its second clause: the phone card is a third of the
+ * width the full sentence was written for, and "Tap to read" is the whole of
+ * what it has to say.
+ */
+export const TOUCH_COPY = {
+  giftButton: 'Tap to open',
+  letterHint: 'Tap to read',
+  musicHint: 'Tap to play music',
+} as const;
+
+export function prompt(key: keyof typeof TOUCH_COPY, coarse: boolean): string {
+  return coarse ? TOUCH_COPY[key] : COPY[key];
+}
 
 /**
  * The five values that were editor-exposed props on the design canvas.

@@ -69,7 +69,7 @@ export function Loader(): React.ReactElement | null {
       >
         {COPY.loaderTitle}
       </span>
-      <div style={{ width: 180, height: 1, background: 'rgba(246,227,194,0.18)' }}>
+      <div style={{ width: 'min(180px, 56vw)', height: 1, background: 'rgba(246,227,194,0.18)' }}>
         <div
           style={{
             width: `${Math.round(progress * 100)}%`,

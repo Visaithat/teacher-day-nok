@@ -10,6 +10,7 @@ import {
   type SlotBound,
 } from './timeline';
 import { lerp, sstep } from '../lib/math';
+import { FIT_STRENGTH } from '../state/viewport';
 
 /** A camera keyframe. The film is a list of these, smoothstep-interpolated. */
 export interface CameraKey {
@@ -19,6 +20,36 @@ export interface CameraKey {
   /** World point the camera looks at. */
   readonly look: readonly [number, number, number];
   readonly fov: number;
+
+  /**
+   * What the shot is ABOUT, as opposed to where it is aimed.
+   *
+   * On a wide frame those differ on purpose: a student stop aims at `sx * 0.68`
+   * while the student stands at `sx`, pushing them off centre so the message
+   * panel can own the left of the frame. That rule-of-thirds offset is also
+   * the single biggest reason the film crops on a phone — at aspect 0.46 the
+   * hold shot's subject group projects to NDC x 0.578..2.118, entirely outside
+   * the frame, and it is the AIM doing that, not the lens. Sliding the aim
+   * onto the subject brings it back to -0.541..0.898 with no fov change at all.
+   *
+   * So on a narrow frame the look target blends toward this. Omit it on a shot
+   * already centred on its subject; the solver falls back to `look`, which
+   * makes the blend a no-op.
+   */
+  readonly subject?: readonly [number, number, number];
+
+  /**
+   * How hard this key wants the horizontal-fit lens widening, overriding
+   * `FIT_STRENGTH`.
+   *
+   * The intro needs almost none. Its content is symmetric about x = 0, so a
+   * narrow crop is harmless there — and the gate beat is composed VERTICALLY
+   * ("gate sign in the upper third"), with the sign 83 m away subtending under
+   * 6 degrees. Widening that shot by the full amount would drop the sign out
+   * of the upper third into the middle of the frame at half the size, which is
+   * a worse picture than the one the fit was meant to rescue.
+   */
+  readonly fit?: number;
 }
 
 /**
@@ -28,7 +59,13 @@ export interface CameraKey {
  * barely moves. The sky (0.000-0.105) and the garden/gate (0.472-0.506) hold
  * the longest - those are the beats the title and the gate sign play over.
  */
-export const INTRO_KEYS: readonly CameraKey[] = [
+/**
+ * Exported because the garden petals and the music box motes are sized off
+ * this same lens - see `useFieldPixelScale`.
+ */
+export const INTRO_FIT = 0.1;
+
+const INTRO_SHOTS: readonly CameraKey[] = [
   { p: 0.0,   pos: [0, 262, 232], look: [0, 330, -170], fov: 52 }, // sky, held
   { p: 0.105, pos: [2, 261, 227], look: [0, 327, -166], fov: 52 }, // hold drift
   { p: 0.15,  pos: [5, 258, 214], look: [0, 306, -152], fov: 52 },
@@ -43,6 +80,11 @@ export const INTRO_KEYS: readonly CameraKey[] = [
   { p: 0.506, pos: [0, 5.1, 81],  look: [0, 11.6, 46],  fov: 48 },
   { p: 0.52,  pos: [0, 4.6, 52],  look: [0, 3.9, 38],   fov: 46 }, // through the gate
 ];
+
+export const INTRO_KEYS: readonly CameraKey[] = INTRO_SHOTS.map((k) => ({
+  ...k,
+  fit: INTRO_FIT,
+}));
 
 /**
  * The full timeline: intro, then one six-key stop per student, then the walk
@@ -87,18 +129,21 @@ export function buildKeys(): CameraKey[] {
       p: a + span * s.noticeEnd,
       pos: [side * 0.9, 4.5, z + 14.5],
       look: [sx * 0.34, 4.0, z + 5.5],
+      subject: [sx, 3.9, z + 1.0],
       fov: 48,
     });
     keys.push({
       p: a + span * s.pushEnd,
       pos: [side * 1.9, 4.4, z + 11.2],
       look: [sx * 0.66, 3.7, z + 0.2],
+      subject: [sx, 3.7, z + 0.2],
       fov: 46,
     });
     keys.push({
       p: a + span * s.holdOut,
       pos: [side * 2.1, 4.45, z + 10.7],
       look: [sx * 0.68, 3.65, z - 0.5],
+      subject: [sx, 3.65, z - 0.5],
       fov: 46,
     });
     keys.push({
@@ -124,11 +169,24 @@ export function buildKeys(): CameraKey[] {
 export interface CameraPose {
   pos: [number, number, number];
   look: [number, number, number];
+  /** Where `look` slides to on a narrow frame. Equals `look` when unset. */
+  subject: [number, number, number];
   fov: number;
+  fit: number;
 }
 
 export function makeCameraPose(): CameraPose {
-  return { pos: [0, 0, 0], look: [0, 0, 0], fov: 50 };
+  return { pos: [0, 0, 0], look: [0, 0, 0], subject: [0, 0, 0], fov: 50, fit: FIT_STRENGTH };
+}
+
+/** A key with every optional field filled in, so `solve` never branches. */
+interface ResolvedKey {
+  readonly p: number;
+  readonly pos: readonly [number, number, number];
+  readonly look: readonly [number, number, number];
+  readonly subject: readonly [number, number, number];
+  readonly fov: number;
+  readonly fit: number;
 }
 
 /**
@@ -145,11 +203,21 @@ export function makeCameraPose(): CameraPose {
  * from-scratch scan over every key the source did each frame.
  */
 export class CameraSolver {
-  private readonly keys: readonly CameraKey[];
+  private readonly keys: readonly ResolvedKey[];
   private lastIndex = 0;
 
   constructor(keys: readonly CameraKey[] = buildKeys()) {
-    this.keys = keys;
+    // Fill the optional fields once, here, rather than branching on them in
+    // `solve` - which runs every frame. A key with no `subject` resolves to
+    // its own `look`, so the narrow-frame blend downstream is a no-op on it.
+    this.keys = keys.map((k) => ({
+      p: k.p,
+      pos: k.pos,
+      look: k.look,
+      subject: k.subject ?? k.look,
+      fov: k.fov,
+      fit: k.fit ?? FIT_STRENGTH,
+    }));
   }
 
   get keyCount(): number {
@@ -163,12 +231,12 @@ export class CameraSolver {
     let i = this.lastIndex;
     if (i > max) i = max;
     // Walk backwards first (scrubbing up), then forwards.
-    while (i > 0 && p < (keys[i] as CameraKey).p) i--;
-    while (i < max && p > (keys[i + 1] as CameraKey).p) i++;
+    while (i > 0 && p < (keys[i] as ResolvedKey).p) i--;
+    while (i < max && p > (keys[i + 1] as ResolvedKey).p) i++;
     this.lastIndex = i;
 
-    const a = keys[i] as CameraKey;
-    const b = keys[i + 1] as CameraKey;
+    const a = keys[i] as ResolvedKey;
+    const b = keys[i + 1] as ResolvedKey;
 
     // Reduced motion: hold each pose and cross-fade across the segment
     // midpoint rather than sweeping the camera through it.
@@ -177,8 +245,10 @@ export class CameraSolver {
     for (let k = 0; k < 3; k++) {
       out.pos[k] = lerp(a.pos[k] as number, b.pos[k] as number, t);
       out.look[k] = lerp(a.look[k] as number, b.look[k] as number, t);
+      out.subject[k] = lerp(a.subject[k] as number, b.subject[k] as number, t);
     }
     out.fov = lerp(a.fov, b.fov, t);
+    out.fit = lerp(a.fit, b.fit, t);
     return out;
   }
 }

@@ -56,7 +56,24 @@ const MODEL_TARGET_H = 3.42;
 const LOD_DISTANCE = 26;
 
 const scratchWorld = new Vector3();
+const scratchAnchor = new Vector3();
 const scratchNdc = new Vector2();
+
+/**
+ * How far above a student's feet the phone's message button is anchored, in
+ * WORLD units - `getWorldPosition` returns the group origin unscaled, and the
+ * group carries `scale 1.3`.
+ *
+ * The window is narrower than it looks. The crown of a rig is
+ * `BODY_H 3.42 * 1.3 = 4.45`, and the floating name plate's bottom edge is
+ * `(5.35 - 0.30) * 1.3 = 6.57`. 5.6 sits 1.15 above the head and 0.97 below
+ * the plate - roughly 63 and 53 pixels at the hold shot on a 390x844 phone,
+ * so a 44px button keeps about 31px clear of the plate.
+ *
+ * Do not raise it past 5.7: with an iOS URL bar showing, the whole window is
+ * about 103 pixels.
+ */
+const MESSAGE_ANCHOR_Y = 5.6;
 
 interface StreetStudent extends StudentInstance {
   readonly signMat: MeshStandardMaterial;
@@ -566,6 +583,7 @@ export function StudentRow(): React.ReactElement {
       f.hoverStudent = hovered;
 
       let focusTarget = 26;
+      let anchored = false;
 
       for (const c of built.students) {
         const focus = phase.idx === c.index ? phase.hold : 0;
@@ -605,6 +623,21 @@ export function StudentRow(): React.ReactElement {
           }
           c.group.getWorldPosition(scratchWorld);
           focusTarget = Math.max(4, camera.position.distanceTo(scratchWorld) + 1.2);
+
+          // Where the phone's message button hangs. Anchored on the figure's
+          // own position rather than on the camera's solved `subject`: that
+          // one lerps onto the pull-back key's `look` thirty units down an
+          // empty road, across the same span of scroll the hold decays over,
+          // so it has already left the student by the time the button can be
+          // pressed. This is a constant and is right through the whole beat.
+          scratchAnchor.copy(scratchWorld);
+          scratchAnchor.y += MESSAGE_ANCHOR_Y;
+          scratchAnchor.project(camera);
+          frameState.subjectX = scratchAnchor.x * 0.5 + 0.5;
+          frameState.subjectY = -scratchAnchor.y * 0.5 + 0.5;
+          // Behind the lens `project` divides by a negative w and mirrors the
+          // point, so this one case has to hide rather than be clamped.
+          anchored = scratchAnchor.z < 1;
         }
 
         // Props fade with their owner's focus.
@@ -616,6 +649,7 @@ export function StudentRow(): React.ReactElement {
         if (keyRef.current) keyRef.current.intensity = 0;
       }
       frameState.dofFocusTarget = focusTarget;
+      frameState.subjectOn = anchored;
     },
     [built, camera, loadModel, raycaster],
   );

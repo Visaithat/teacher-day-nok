@@ -14,10 +14,13 @@ export function MuteButton({ onToggle }: { onToggle: () => void }): React.ReactE
     <button
       type="button"
       onClick={onToggle}
+      // A 30px pill is under half the minimum touch target; the class puts a
+      // 44px transparent catcher around it without moving a pixel of it.
+      className="tap-target"
       style={{
         position: 'absolute',
-        left: 22,
-        bottom: 22,
+        left: 'calc(env(safe-area-inset-left, 0px) + clamp(12px, 3vw, 22px))',
+        bottom: 'calc(env(safe-area-inset-bottom, 0px) + clamp(12px, 3vw, 22px))',
         pointerEvents: 'auto',
         cursor: 'pointer',
         display: 'flex',

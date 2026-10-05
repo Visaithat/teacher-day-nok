@@ -14,6 +14,7 @@ import petalFrag from '../../shaders/petals.frag.glsl?raw';
 import moteVert from '../../shaders/motes.vert.glsl?raw';
 import moteFrag from '../../shaders/motes.frag.glsl?raw';
 import { makeRandom } from '../../lib/math';
+import { FIT_STRENGTH, fitFov, fovGainFor } from '../../state/viewport';
 import type { Texture } from 'three';
 
 /**
@@ -200,15 +201,35 @@ export function createMoteField(o: MoteFieldOptions): {
  * (the gift box at fov 34, the journey at ~48, the finale at 74), so a single
  * constant cannot be right for all of them. Recomputed on resize and on any
  * device-pixel-ratio change.
+ *
+ * `fit` is for the fields seen through the JOURNEY camera, whose fov is no
+ * longer the authored constant on a narrow frame - pass the key's fit strength
+ * and the widening is applied here, where the aspect is already a dependency.
+ * Without it a phone draws every petal and mote about a third too large.
  */
-export function useFieldPixelScale(uniform: IUniform<number>, fov: number): void {
+export function useFieldPixelScale(
+  uniform: IUniform<number>,
+  fov: number,
+  fit?: number,
+): void {
   const size = useThree((s) => s.size);
   const gl = useThree((s) => s.gl);
 
+  // The DPR is a dependency in its own right, not just a value read inside
+  // the effect: the quality ladder changes it mid-film without changing
+  // `size` or the renderer's identity, and the header above already promised
+  // this was recomputed on any device-pixel-ratio change.
+  const dpr = gl.getPixelRatio();
+
   useLayoutEffect(() => {
-    const bufferHeight = size.height * gl.getPixelRatio();
-    uniform.value = bufferHeight / (2 * Math.tan((fov * Math.PI) / 360));
-  }, [uniform, fov, size, gl]);
+    const bufferHeight = size.height * dpr;
+    const aspect = size.width / Math.max(1, size.height);
+    const live =
+      fit === undefined
+        ? fov
+        : fitFov(fov, Math.pow(fovGainFor(aspect), fit / FIT_STRENGTH));
+    uniform.value = bufferHeight / (2 * Math.tan((live * Math.PI) / 360));
+  }, [uniform, fov, fit, size, gl, dpr]);
 }
 
 /** Convenience wrapper so callers can drop a field straight into the scene. */

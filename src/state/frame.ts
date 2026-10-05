@@ -60,6 +60,29 @@ export interface FrameState {
   panelStrength: number;
 
   /**
+   * Where the shot's subject is on screen, as fractions of the frame, and
+   * whether it is in front of the lens at all.
+   *
+   * Published by `StudentRow`, which is inside the canvas and holds both the
+   * camera and the figures. The DOM overlay hangs the phone's message button
+   * here, so it sits on the person rather than in a corner.
+   *
+   * Deliberately NOT the camera solver's `pose.subject`, which was the first
+   * attempt: that point lerps onto the pull-back key's `look`, thirty units
+   * down an empty road, over the very same span of scroll that the hold
+   * decays across - so it has already left the student by the time the button
+   * becomes tappable. The figure's own position is a constant and is right at
+   * every moment of the beat.
+   *
+   * Numbers rather than the camera itself, for the same reason `cameraZ` is a
+   * number: the overlay must not hold a scene object, and it must not project
+   * anything itself from outside the canvas.
+   */
+  subjectX: number;
+  subjectY: number;
+  subjectOn: boolean;
+
+  /**
    * Distance the depth of field should focus at. The street sequence sets it
    * to the student being framed so the shot has a real focal subject; the
    * renderer eases toward it rather than snapping.
@@ -91,6 +114,9 @@ export const frame: FrameState = {
   musicBoxOpenedAt: 0,
   cameraZ: 232,
   panelStrength: 0,
+  subjectX: 0.5,
+  subjectY: 0.5,
+  subjectOn: false,
   dofFocusTarget: 26,
   reduced: false,
 };
@@ -102,6 +128,7 @@ export function resetFrame(): void {
   frame.phase = OFF_STREET;
   frame.hoverStudent = -1;
   frame.hoverMusicBox = false;
+  frame.subjectOn = false;
   frame.musicBoxOpen = false;
   frame.musicBoxOpenedAt = 0;
 }

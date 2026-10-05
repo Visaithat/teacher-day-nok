@@ -5,6 +5,7 @@ import { Orchestrator } from './scenes/Orchestrator';
 import { CameraRig } from './scenes/CameraRig';
 import { Renderer } from './scenes/Renderer';
 import { AdaptiveQuality, PerfHud } from './scenes/PerfTools';
+import { ViewportProbe } from './scenes/ViewportProbe';
 import { World } from './scenes/World';
 import { TextureProvider } from './textures/TextureProvider';
 import { Loader } from './components/overlay/Loader';
@@ -13,6 +14,7 @@ import { GiftUI } from './components/overlay/GiftUI';
 import { TitleCard } from './components/overlay/TitleCard';
 import { ChapterCaption } from './components/overlay/ChapterCaption';
 import { StudentPanel } from './components/overlay/StudentPanel';
+import { StudentMessage } from './components/overlay/StudentMessage';
 import { NowPlaying } from './components/overlay/NowPlaying';
 import { ProgressRail } from './components/overlay/ProgressRail';
 import { MuteButton } from './components/overlay/MuteButton';
@@ -23,10 +25,12 @@ import { useLenisScroll } from './hooks/useLenisScroll';
 import { useReducedMotion } from './hooks/useReducedMotion';
 import { usePointerTracking } from './hooks/usePointerTracking';
 import { useYouTubePlayer } from './components/musicbox/useYouTubePlayer';
+import { musicBoxHit } from './components/musicbox/musicBoxHit';
 import { QUALITY } from './config/quality';
 import { DEFAULT_PROPS } from './config/copy';
 import { SCROLLER_HEIGHT_VH, GIFT_OPEN_SECONDS } from './config/timeline';
 import { frame, resetFrame } from './state/frame';
+import { fitFov } from './state/viewport';
 import { useUIStore } from './state/useUIStore';
 import { filmAudio } from './audio/audio';
 
@@ -74,13 +78,33 @@ export default function App(): React.ReactElement {
   }, [music, setMusicOn]);
 
   // One click handler for the whole stage: the gift first, then the box.
-  const onStageClick = useCallback(() => {
-    if (!frame.opened) {
-      openGift();
-      return;
-    }
-    if (frame.hoverMusicBox) openMusicBox();
-  }, [openGift, openMusicBox]);
+  const onStageClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!frame.opened) {
+        openGift();
+        return;
+      }
+      if (frame.hoverMusicBox) {
+        openMusicBox();
+        return;
+      }
+
+      // `hoverMusicBox` is maintained by a raycast in the render loop, gated
+      // on the pointer having moved. A finger does not move: a tap can reach
+      // `click` with no `pointermove` and, if it is quick, with no animation
+      // frame at all in between - so the first tap on the box used to be
+      // swallowed and the song never started. Ask directly instead, from
+      // where the tap actually landed.
+      const el = stageRef.current;
+      const test = musicBoxHit.test;
+      if (!el || !test) return;
+      const r = el.getBoundingClientRect();
+      const ndcX = ((e.clientX - r.left) / r.width) * 2 - 1;
+      const ndcY = -((e.clientY - r.top) / r.height) * 2 + 1;
+      if (test(ndcX, ndcY)) openMusicBox();
+    },
+    [openGift, openMusicBox],
+  );
 
   useEffect(() => {
     if (!booted) return;
@@ -111,6 +135,20 @@ export default function App(): React.ReactElement {
     music.setMuted(next);
   }, [music, toggleMuted]);
 
+  /**
+   * Hold the film still while the phone's message card is open.
+   *
+   * `setPaused`, never `setLocked`: the latter rewinds to the top on release,
+   * because for Scene 1 "unlock" means "the film starts now". Using it here
+   * would send the reader back to the gift box every time they closed a letter.
+   */
+  const onHold = useCallback(
+    (held: boolean) => {
+      scroll.current?.setPaused(held);
+    },
+    [scroll],
+  );
+
   const onReplay = useCallback(() => {
     resetFrame();
     replayStore();
@@ -126,6 +164,10 @@ export default function App(): React.ReactElement {
         <Canvas
           dpr={settings.dpr as [number, number]}
           shadows={settings.shadows}
+          // A mobile URL bar collapsing mid-scroll is a resize, and every one
+          // of them reallocates the whole composer chain in `Renderer`. R3F's
+          // own resize debounce is 0; this absorbs the churn.
+          resize={{ debounce: 200, scroll: false }}
           gl={{
             powerPreference: 'high-performance',
             // The composer renders to its own non-multisampled targets, so
@@ -134,8 +176,11 @@ export default function App(): React.ReactElement {
             toneMapping: ACESFilmicToneMapping,
             toneMappingExposure: 0.9,
           }}
-          camera={{ fov: 52, near: 0.5, far: 3000, position: [0, 262, 232] }}
+          // The solver overwrites this on frame one; fitting it here only
+          // keeps the very first paint from being framed for a wide window.
+          camera={{ fov: fitFov(52), near: 0.5, far: 3000, position: [0, 262, 232] }}
         >
+          <ViewportProbe />
           <AdaptiveQuality />
           <PerfHud />
           <Orchestrator />
@@ -159,6 +204,8 @@ export default function App(): React.ReactElement {
           <ProgressRail />
           <MuteButton onToggle={onMute} />
           <Loader />
+          {/* Last, so the dialog is last in the tab order too. */}
+          <StudentMessage onHold={onHold} />
         </div>
       </div>
 

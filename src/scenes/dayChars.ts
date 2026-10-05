@@ -8,10 +8,18 @@ export interface DayChar {
   readonly name: string;
   readonly rig: BlockyRig;
   readonly holder: Group;
-  /** Seat on the ring, in radians clockwise from +Z. */
-  readonly angle: number;
+  /**
+   * Seat on the ring, in radians clockwise from +Z.
+   *
+   * Not readonly: a portrait frame plays a different shot with a different
+   * seat table (`dayAngleNarrow` in the roster), and `DayScene` re-seats the
+   * ring on resize rather than rebuilding it. The per-frame entrance ramp
+   * already derives `holder.position` from this, so a re-seat is two numbers
+   * and the yaw.
+   */
+  angle: number;
   /** Metres from the lens on the ground plane, once they have arrived. */
-  readonly radius: number;
+  radius: number;
   /** Forward tilt over the lens, in radians. The same for everyone. */
   readonly lean: number;
   /** Point in the wake ramp where this student starts sliding in. */

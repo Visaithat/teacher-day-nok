@@ -17,11 +17,15 @@ import { createMoteField, SpriteField, useFieldPixelScale } from '../fx/SpriteFi
 import { mat } from '../../lib/materials';
 import { clamp, lerp } from '../../lib/math';
 import { GATES, MUSIC_BOX_OPEN_SECONDS } from '../../config/timeline';
+import { INTRO_FIT } from '../../config/cameraKeys';
+import { prompt } from '../../config/copy';
+import { readViewport } from '../../hooks/useViewport';
+import { musicBoxHit } from './musicBoxHit';
 import { useUpdate } from '../../lib/updateBus';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import { setOpacity, setStyle } from '../../lib/domWrite';
-import type { FrameState } from '../../state/frame';
+import { frame, type FrameState } from '../../state/frame';
 
 const BOX_POSITION = new Vector3(4.4, 0, 58);
 const HINT_HEIGHT = 4.4;
@@ -84,16 +88,20 @@ export function MusicBox(): React.ReactElement {
     [quality, textures.glow],
   );
 
-  useFieldPixelScale(motes.uniforms.uPixelScale, 48);
+  useFieldPixelScale(motes.uniforms.uPixelScale, 48, INTRO_FIT);
 
   // The hint is a DOM element tracking a 3D point, so it stays crisp.
+  //
+  // Its styling moved into `index.css` as `.mb-hint`: the pill was `nowrap` at
+  // 0.26em tracking - about 230px of ribbon - and its anchor is clamped to
+  // 16-84% of the frame, so on a phone it hung off both edges at once.
   useEffect(() => {
     const el = document.createElement('div');
-    el.style.cssText =
-      'position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:8px;transform:translate(-50%,-100%);opacity:0;pointer-events:none';
-    el.innerHTML =
-      '<span style="white-space:nowrap;border:1px solid rgba(255,196,120,0.4);border-radius:999px;background:rgba(24,15,8,0.55);backdrop-filter:blur(6px);padding:9px 16px;font-family:\'Poppins\',sans-serif;font-size:10px;font-weight:500;letter-spacing:0.26em;text-transform:uppercase;color:#ffe0b0">Click to play music</span>' +
-      '<span style="width:1px;height:26px;background:linear-gradient(rgba(255,196,120,0.8),rgba(255,196,120,0))"></span>';
+    el.className = 'mb-hint';
+    const pill = document.createElement('span');
+    pill.textContent = prompt('musicHint', readViewport().coarse);
+    const stalk = document.createElement('span');
+    el.append(pill, stalk);
     document.querySelector('.overlay-root')?.appendChild(el);
     hintRef.current = el;
     return () => {
@@ -106,6 +114,31 @@ export function MusicBox(): React.ReactElement {
   const brass = useMemo(() => mat('metal', '#c9a24a'), []);
   const wood = useMemo(() => mat('wood', '#6b3f22'), []);
 
+  /**
+   * Is this point on the music box?
+   *
+   * Lifted out of the update loop so the stage's click handler can run it
+   * from where a tap actually landed - see `musicBoxHit.ts` for why a finger
+   * cannot rely on the hover state the loop maintains.
+   */
+  const hitTest = useCallback(
+    (ndcX: number, ndcY: number): boolean => {
+      const f = frame;
+      if (!hitRef.current || f.musicBoxOpen || !GATES.musicBoxInteractive(f.p)) return false;
+      scratchNdc.set(ndcX, ndcY);
+      raycaster.setFromCamera(scratchNdc, camera);
+      return raycaster.intersectObject(hitRef.current, false).length > 0;
+    },
+    [camera],
+  );
+
+  useEffect(() => {
+    musicBoxHit.test = hitTest;
+    return () => {
+      musicBoxHit.test = null;
+    };
+  }, [hitTest]);
+
   const update = useCallback(
     (f: FrameState) => {
       const { p, time } = f;
@@ -114,12 +147,7 @@ export function MusicBox(): React.ReactElement {
       const oa = open ? clamp((time - f.musicBoxOpenedAt) / MUSIC_BOX_OPEN_SECONDS, 0, 1) : 0;
 
       // Hover test, only while the box is in play and still shut.
-      let hovering = false;
-      if (f.hasPointer && GATES.musicBoxInteractive(p) && !open && hitRef.current) {
-        scratchNdc.set(f.ndcX, f.ndcY);
-        raycaster.setFromCamera(scratchNdc, camera);
-        hovering = raycaster.intersectObject(hitRef.current, false).length > 0;
-      }
+      const hovering = f.hasPointer && hitTest(f.ndcX, f.ndcY);
       f.hoverMusicBox = hovering;
 
       hoverRef.current = lerp(hoverRef.current, hovering ? 1 : 0, 0.12);

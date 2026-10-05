@@ -3,8 +3,8 @@ import { GATES } from '../../config/timeline';
 import { useUpdate } from '../../lib/updateBus';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import { lerp } from '../../lib/math';
-import { isMobileDevice } from '../../config/quality';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useViewport } from '../../hooks/useViewport';
 import type { FrameState } from '../../state/frame';
 
 /** How far behind the cursor each blob lags. Biggest and slowest first. */
@@ -33,7 +33,11 @@ export function CursorTrail(): React.ReactElement | null {
   ]);
   const pointer = useRef({ x: -9999, y: -9999 });
   const reduced = useReducedMotion();
-  const mobile = isMobileDevice();
+  // Subscribed, not sampled once: `isMobileDevice()` was read at render with
+  // no listener, so rotating a tablet across the boundary never re-evaluated
+  // it and the trail either stayed on a touch screen or stayed off a desktop.
+  const { coarse } = useViewport();
+  const mobile = coarse;
 
   useEffect(() => {
     if (mobile || reduced) return;

@@ -15,6 +15,14 @@ body {
   overflow-x: hidden;
 }
 
+/* Pull-to-refresh sits directly on top of the locked gift scene, which is the
+   first thing anybody touches. `overflow: hidden` on <html> is the lock
+   `useLenisScroll` applies, and on iOS it is not reliable on its own. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 a {
   color: #e8c88a;
   text-decoration: none;
@@ -39,12 +47,23 @@ html.lenis body {
   scroll-behavior: auto !important;
 }
 
-/* The stage: everything visible is fixed over the scroll spacer. */
+/* The stage: everything visible is fixed over the scroll spacer.
+
+   `100dvh` rather than the `bottom: 0` that `inset` implies: a mobile URL bar
+   makes the two disagree, and a film that letterboxes itself every time the
+   bar moves is worse than one that resizes. The canvas resize is debounced on
+   the R3F side so the composer is not reallocated on every frame of that.
+
+   `touch-action: manipulation` drops the double-tap-to-zoom delay - taps are
+   how the gift and the music box are opened - while leaving pinch zoom alone,
+   which is somebody's way of reading the letters. */
 .stage {
   position: fixed;
   inset: 0;
+  height: 100dvh;
   overflow: hidden;
   background: #07070b;
+  touch-action: manipulation;
 }
 
 .overlay-root {
@@ -98,7 +117,7 @@ html.lenis body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 16px;
+  bottom: clamp(8px, 4cqh, 16px);
   display: flex;
   justify-content: center;
   padding: 0 10px;
@@ -108,23 +127,38 @@ html.lenis body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
+  /* Not `nowrap`. The copy is 28 characters of 0.24em-tracked uppercase -
+     about 235px - and the card it sits in is 136px wide on a phone. */
+  text-align: center;
+  max-width: 100%;
   border: 1px solid rgba(255, 196, 120, 0.4);
   border-radius: 999px;
   background: rgba(24, 15, 8, 0.62);
   backdrop-filter: blur(6px);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
-  padding: 10px 18px;
+  padding: clamp(7px, 3cqh, 10px) clamp(11px, 5cqw, 18px);
   font-family: 'Poppins', system-ui, sans-serif;
   font-size: clamp(8.5px, 0.72vw, 10px);
   font-weight: 500;
-  letter-spacing: 0.24em;
+  /* The tracking is what overflows first, so it scales before the size does. */
+  letter-spacing: clamp(0.12em, 1.6cqw, 0.24em);
   text-transform: uppercase;
   color: #ffe0b0;
   animation: tdBob 3.4s ease-in-out infinite;
 }
 
-.panel-card:hover .panel-hint > span,
+/* `:hover` is latched on a touch screen - it sticks from the tap until the
+   next one lands somewhere else - so the brightened state would simply stay
+   on. `:focus-visible` keeps the keyboard affordance either way. */
+@media (hover: hover) {
+  .panel-card:hover .panel-hint > span {
+    animation-play-state: paused;
+    border-color: rgba(255, 214, 160, 0.8);
+    background: rgba(38, 24, 13, 0.78);
+    color: #fff4e2;
+  }
+}
+
 .panel-card:focus-visible .panel-hint > span {
   animation-play-state: paused;
   border-color: rgba(255, 214, 160, 0.8);
@@ -138,17 +172,87 @@ html.lenis body {
   position: absolute;
   top: 0;
   right: 0;
-  width: 34px;
-  height: 34px;
+  /* 34px of a 136px phone card is a quarter of the photograph. */
+  width: clamp(20px, 10cqw, 34px);
+  height: clamp(20px, 10cqw, 34px);
   background: linear-gradient(225deg, rgba(255, 246, 232, 0.92) 0 50%, rgba(255, 246, 232, 0) 50%);
   filter: drop-shadow(-3px 3px 4px rgba(0, 0, 0, 0.45));
   transition: width 0.35s ease, height 0.35s ease;
 }
 
-.panel-card:hover .panel-peel,
+@media (hover: hover) {
+  .panel-card:hover .panel-peel {
+    width: clamp(27px, 13.5cqw, 46px);
+    height: clamp(27px, 13.5cqw, 46px);
+  }
+}
+
 .panel-card:focus-visible .panel-peel {
-  width: 46px;
-  height: 46px;
+  width: clamp(27px, 13.5cqw, 46px);
+  height: clamp(27px, 13.5cqw, 46px);
+}
+
+/* A 44px hit area without a 44px control.
+
+   Several of the corner chips are deliberately small - 30px tall pills that
+   sit at the edge of the frame and stay out of the film's way. On a touch
+   screen that is under half the minimum target. The pseudo-element is part of
+   the button, so it takes the tap; it draws nothing and changes no layout, so
+   the wide-window look is exactly what it was. */
+.tap-target {
+  position: relative;
+}
+
+.tap-target::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* ---- the music box's prompt ---------------------------------------------
+
+   Built in `MusicBox.tsx` and parked in `.overlay-root`, tracking a 3D point.
+   The pill used to be `white-space: nowrap` at 0.26em tracking, which is about
+   230px; its anchor is clamped to 16-84% of the frame, so on a 390px phone it
+   hung off whichever edge the box was nearest. */
+.mb-hint {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translate(-50%, -100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mb-hint > span:first-child {
+  max-width: min(70vw, 260px);
+  text-align: center;
+  border: 1px solid rgba(255, 196, 120, 0.4);
+  border-radius: 999px;
+  background: rgba(24, 15, 8, 0.55);
+  backdrop-filter: blur(6px);
+  padding: 9px 16px;
+  font-family: 'Poppins', sans-serif;
+  font-size: clamp(8px, 2.4vw, 10px);
+  font-weight: 500;
+  letter-spacing: clamp(0.14em, 0.9vw, 0.26em);
+  line-height: 1.7;
+  text-transform: uppercase;
+  color: #ffe0b0;
+}
+
+.mb-hint > span:last-child {
+  width: 1px;
+  height: 26px;
+  background: linear-gradient(rgba(255, 196, 120, 0.8), rgba(255, 196, 120, 0));
 }
 
 @keyframes tdGrain {
@@ -175,6 +279,154 @@ html.lenis body {
   }
 }
 
+/* ---- the phone's message button, and the card it opens -------------------
+
+   The desktop panel has a side of the frame to put a card in; a phone has not,
+   so on a phone the street stays clear and the message lives behind a button
+   on the figure. `StudentMessage.tsx` has the reasoning.
+
+   The tracker is the thing the render loop moves, and the button inside it is
+   the thing that is styled. Keeping them apart is the same rule `.panel-hint`
+   follows: an animation must never live on the element carrying a transform
+   that something else is writing every frame. */
+.msg-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.msg-button {
+  /* Centred on the anchor point the loop writes onto the tracker. Static, so
+     the dot's animation below has nothing to fight. */
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 214, 160, 0.42);
+  border-radius: 50%;
+  background: rgba(18, 14, 10, 0.72);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  color: #ffe0b0;
+  cursor: pointer;
+}
+
+.msg-button:focus-visible {
+  outline: 2px solid rgba(255, 214, 160, 0.9);
+  outline-offset: 3px;
+}
+
+/* Unread. The ring is what keeps it legible against a lit street rather than
+   against the dark it was picked for. */
+.msg-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(12, 10, 8, 0.9);
+  border-radius: 50%;
+  background: #ff5c5c;
+  animation: tdPulse 1.8s ease-in-out infinite;
+}
+
+/* ---- the dialog --------------------------------------------------------- */
+
+@keyframes msgIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes msgCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* `absolute`, not `fixed`: this covers exactly `.overlay-root`, which is the
+   stage box, and so inherits its `100dvh` behaviour when a URL bar moves.
+
+   The z-index is one of only two in the project. Nothing in `.overlay-root`
+   has ever had one, so the corner chrome painted over whatever came before it
+   in `App.tsx` - which is how the mute pill ended up sitting across the card
+   this replaces. 50 puts the scrim above every sibling, so those chips dim
+   with the rest of the frame instead of floating over it. */
+.msg-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(env(safe-area-inset-top, 0px), 16px) 16px
+    max(env(safe-area-inset-bottom, 0px), 16px);
+  background: rgba(6, 5, 9, 0.66);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+  /* Belt to `overflow: hidden`'s braces. See the non-passive `touchmove`
+     listener in `StudentMessage.tsx` for why neither is enough alone on iOS. */
+  touch-action: none;
+  animation: msgIn 0.24s ease both;
+}
+
+.msg-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(88vw, 420px);
+  max-height: min(84dvh, 680px);
+  padding: 20px;
+  border: 1px solid rgba(255, 214, 160, 0.22);
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(22, 16, 11, 0.94), rgba(12, 9, 7, 0.9));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+  animation: msgCardIn 0.32s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.msg-card:focus-visible {
+  outline: none;
+}
+
+.msg-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 236, 206, 0.28);
+  border-radius: 50%;
+  background: rgba(12, 12, 18, 0.55);
+  color: rgba(255, 242, 224, 0.86);
+  cursor: pointer;
+  z-index: 1;
+}
+
+.msg-close:focus-visible {
+  outline: 2px solid rgba(255, 214, 160, 0.9);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .grain {
     animation: none !important;
@@ -182,6 +434,14 @@ html.lenis body {
   /* The prompt still has to be found, so it stays exactly as bright - only
      the bob goes. */
   .panel-hint > span {
+    animation: none !important;
+  }
+  /* Same rule for the unread dot: it keeps its colour, it stops breathing. */
+  .msg-dot {
+    animation: none !important;
+  }
+  .msg-scrim,
+  .msg-card {
     animation: none !important;
   }
 }

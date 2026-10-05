@@ -19,6 +19,7 @@ import { useTextures } from '../../textures/TextureProvider';
 import { mat } from '../../lib/materials';
 import { makeRandom } from '../../lib/math';
 import { GATES } from '../../config/timeline';
+import { INTRO_FIT } from '../../config/cameraKeys';
 import { useUpdate } from '../../lib/updateBus';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
@@ -233,7 +234,7 @@ export function Garden(): React.ReactElement {
 
   // The garden is seen through the journey camera, which holds near fov 48
   // across this beat.
-  useFieldPixelScale(petals.uniforms.uPixelScale, 48);
+  useFieldPixelScale(petals.uniforms.uPixelScale, 48, INTRO_FIT);
 
   // ---------------------------------------------------------------- update
   const update = useCallback(

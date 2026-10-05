@@ -65,15 +65,21 @@ export function Renderer(): null {
     return { composer, renderPass, bokeh, bloom };
   }, [gl, scene, camera]);
 
+  // `dpr` is read during render so it can be a dependency. It currently only
+  // ever changes alongside `bloomResolutionScale`, which is what has been
+  // keeping this effect honest by accident - a future tier that shared a bloom
+  // scale would leave the composer rendering at the old ratio and quietly
+  // throw away the whole benefit of having dropped it.
+  const dpr = gl.getPixelRatio();
+
   useEffect(() => {
-    const dpr = gl.getPixelRatio();
     rig.composer.setSize(size.width, size.height);
     rig.composer.setPixelRatio(dpr);
     rig.bloom.resolution.set(
       Math.max(1, Math.round(size.width * settings.bloomResolutionScale)),
       Math.max(1, Math.round(size.height * settings.bloomResolutionScale)),
     );
-  }, [rig, size, gl, settings.bloomResolutionScale]);
+  }, [rig, size, gl, dpr, settings.bloomResolutionScale]);
 
   useEffect(
     () => () => {

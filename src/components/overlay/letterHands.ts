@@ -13,7 +13,9 @@ import type { Hand } from '../../config/students';
 
 export interface HandStyle {
   /** Family stack. Every entry ends in a generic cursive so a failed webfont
-   *  request costs the letter its handwriting, never its legibility. */
+   *  request costs the letter its handwriting, never its legibility. None of
+   *  the five hands has Lao glyphs, so each one names the Looped face second:
+   *  the Lao in a letter falls through to it, the Latin stays handwritten. */
   readonly family: string;
   /**
    * Multiplier on the card's base size.
@@ -32,44 +34,57 @@ export interface HandStyle {
 }
 
 export const HANDS: Record<Hand, HandStyle> = {
-  /** Timmy — a neat, blocky print that still slopes. */
+  /** Timmy — a neat, blocky print that still slopes. His letter is the
+   *  longest, in Lao, so the leading is the 1.5 the Lao face is comfortable at
+   *  rather than the 1.62 this hand had for English: every bit of line height
+   *  given back is font size the fit in `LetterCard` does not have to take. */
   patrick: {
-    family: "'Patrick Hand', 'Bradley Hand', cursive",
+    family: "'Patrick Hand', 'Noto Sans Lao Looped', 'Bradley Hand', cursive",
     size: 1,
     ink: '#2f3a52',
-    leading: 1.62,
+    leading: 1.5,
     signTilt: -1.6,
   },
-  /** Kengkue — loose and fast, the way someone draws rather than writes. */
+  /** Kengkue — loose and fast, the way someone draws rather than writes. His
+   *  letter is in Lao, and the 1.3 this hand had for English let the stacked
+   *  vowel signs of one line touch the next; 1.5 is the Lao face's. */
   caveat: {
-    family: "'Caveat', 'Segoe Script', cursive",
+    family: "'Caveat', 'Noto Sans Lao Looped', 'Segoe Script', cursive",
     size: 1.34,
     ink: '#2a2f3d',
-    leading: 1.3,
+    leading: 1.5,
     signTilt: 2.4,
   },
-  /** Vanhxay — round, evenly spaced, faintly stubborn. */
+  /** Vanhxay — round, evenly spaced, faintly stubborn. His letter is in Lao;
+   *  1.5 is the Lao face's leading, and the 1.72 this hand had for English
+   *  cost his letter most of a pixel of font size on every card. */
   indie: {
-    family: "'Indie Flower', 'Comic Sans MS', cursive",
+    family: "'Indie Flower', 'Noto Sans Lao Looped', 'Comic Sans MS', cursive",
     size: 0.98,
     ink: '#33445c',
-    leading: 1.72,
+    leading: 1.5,
     signTilt: -2.8,
   },
-  /** Namthip — thin and precise, written with a fine nib. */
+  /** Namthip — thin and precise, written with a fine nib. Her letter is in
+   *  Lao, which Shadows Into Light has no glyphs for, so the Lao falls through
+   *  to the Looped face index.html already loads for the finale. The leading
+   *  is set for that face, not this one: 1.5 is as tight as Lao goes before
+   *  the stacked vowel signs touch. */
   shadows: {
-    family: "'Shadows Into Light', 'Segoe Script', cursive",
+    family: "'Shadows Into Light', 'Noto Sans Lao Looped', 'Segoe Script', cursive",
     size: 1.14,
     ink: '#3a3550',
-    leading: 1.66,
+    leading: 1.5,
     signTilt: 1.4,
   },
-  /** Nina — big, bouncy, takes up the whole line. */
+  /** Nina — big, bouncy, takes up the whole line. Her letter is the longest
+   *  of the five and in Lao; at the 1.82 this hand had for English it set at
+   *  7px on a small laptop's card, at the Lao face's 1.5 it sets at 8. */
   gloria: {
-    family: "'Gloria Hallelujah', 'Comic Sans MS', cursive",
+    family: "'Gloria Hallelujah', 'Noto Sans Lao Looped', 'Comic Sans MS', cursive",
     size: 0.84,
     ink: '#2e3b4e',
-    leading: 1.82,
+    leading: 1.5,
     signTilt: -0.9,
   },
 };

@@ -4,6 +4,7 @@ import { GATES } from '../../config/timeline';
 import { useUpdate } from '../../lib/updateBus';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import { useUIStore } from '../../state/useUIStore';
+import { useViewport } from '../../hooks/useViewport';
 import type { FrameState } from '../../state/frame';
 
 /**
@@ -23,6 +24,7 @@ export function ProgressRail(): React.ReactElement {
   const dotRef = useRef<HTMLDivElement>(null);
   const trackHeight = useRef(0);
   const unlocked = useUIStore((s) => s.unlocked);
+  const { size, coarse } = useViewport();
   const unlockedRef = useRef(unlocked);
   unlockedRef.current = unlocked;
 
@@ -65,7 +67,7 @@ export function ProgressRail(): React.ReactElement {
       ref={wrapRef}
       style={{
         position: 'absolute',
-        right: 26,
+        right: 'clamp(10px, 2.5vw, 26px)',
         top: '50%',
         transform: 'translateY(-50%)',
         display: 'flex',
@@ -76,22 +78,30 @@ export function ProgressRail(): React.ReactElement {
         pointerEvents: 'none',
       }}
     >
-      <span
-        style={{
-          fontSize: 9,
-          letterSpacing: '0.24em',
-          writingMode: 'vertical-rl',
-          color: 'rgba(255,236,206,0.5)',
-        }}
-      >
-        {COPY.journeyLabel}
-      </span>
+      {/*
+        The label goes on a phone. It is a vertical strip of tracked capitals
+        in the right-hand gutter - the same gutter the "now playing" chip has
+        to reach into on a 390px frame - and of the two, the rail is the one
+        that carries information. The rail itself stays.
+      */}
+      {size === 'phone' ? null : (
+        <span
+          style={{
+            fontSize: 9,
+            letterSpacing: '0.24em',
+            writingMode: 'vertical-rl',
+            color: 'rgba(255,236,206,0.5)',
+          }}
+        >
+          {COPY.journeyLabel}
+        </span>
+      )}
       <div
         ref={trackRef}
         style={{
           position: 'relative',
           width: 2,
-          height: 'min(38vh, 300px)',
+          height: 'min(38dvh, 300px)',
           borderRadius: 2,
           background: 'rgba(255,236,206,0.16)',
         }}
@@ -115,10 +125,12 @@ export function ProgressRail(): React.ReactElement {
           ref={dotRef}
           style={{
             position: 'absolute',
-            top: -4.5,
+            // A little larger where the rail is the only thing telling you
+            // how far through the film you are, and there is no cursor.
+            top: coarse ? -5.5 : -4.5,
             left: '50%',
-            width: 9,
-            height: 9,
+            width: coarse ? 11 : 9,
+            height: coarse ? 11 : 9,
             borderRadius: '50%',
             background: '#ffd08a',
             boxShadow: '0 0 14px 3px rgba(255,190,120,0.8)',

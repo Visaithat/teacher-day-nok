@@ -23,6 +23,16 @@ export interface UIState {
   quality: QualityTier;
   /** A click that landed while the world was still building. */
   pendingOpen: boolean;
+  /**
+   * Which students' messages have been opened, one bit each.
+   *
+   * A bitmask rather than an array or a Set because it compares by value: the
+   * five bits fit in a number, so `markRead` can no-op an already-read student
+   * the way `setActiveStudent` no-ops an unchanged index, and there is no
+   * array identity to churn a render. The phone's message button wears an
+   * unread dot until its bit is set.
+   */
+  readMask: number;
 
   setProgress: (v: number) => void;
   setBooted: (v: boolean) => void;
@@ -33,8 +43,14 @@ export interface UIState {
   setActiveStudent: (i: number) => void;
   setQuality: (q: QualityTier) => void;
   setPendingOpen: (v: boolean) => void;
+  markRead: (i: number) => void;
   /** Reset everything the Replay button should undo. */
   replay: () => void;
+}
+
+/** Has student `i`'s message been opened? The bit arithmetic lives here only. */
+export function hasRead(mask: number, i: number): boolean {
+  return i >= 0 && (mask & (1 << i)) !== 0;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -47,6 +63,7 @@ export const useUIStore = create<UIState>((set) => ({
   activeStudent: -1,
   quality: initialTier(),
   pendingOpen: false,
+  readMask: 0,
 
   setProgress: (v) => set({ progress: v }),
   setBooted: (v) => set({ booted: v }),
@@ -57,6 +74,9 @@ export const useUIStore = create<UIState>((set) => ({
   setActiveStudent: (i) => set((s) => (s.activeStudent === i ? s : { activeStudent: i })),
   setQuality: (q) => set((s) => (s.quality === q ? s : { quality: q })),
   setPendingOpen: (v) => set({ pendingOpen: v }),
+  markRead: (i) =>
+    set((s) => (s.readMask & (1 << i) ? s : { readMask: s.readMask | (1 << i) })),
 
-  replay: () => set({ musicOn: false, activeStudent: -1 }),
+  // The dots come back too: a replayed film has five unread messages again.
+  replay: () => set({ musicOn: false, activeStudent: -1, readMask: 0 }),
 }));

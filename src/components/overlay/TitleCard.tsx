@@ -65,7 +65,9 @@ export function TitleCard(): React.ReactElement {
             justifyContent: 'center',
             fontFamily: "'Playfair Display', serif",
             fontWeight: 600,
-            fontSize: 'clamp(42px, 8.4vw, 124px)',
+            // The floor drops so three Playfair words fit two lines on a
+            // phone instead of three; 8.4vw still reaches 124px by 1476px.
+            fontSize: 'clamp(34px, 8.4vw, 124px)',
             lineHeight: 1.34,
             letterSpacing: '0.01em',
             color: '#f3f6ff',
@@ -94,7 +96,9 @@ export function TitleCard(): React.ReactElement {
             opacity: 0,
             fontSize: 'clamp(11px, 1.5vw, 15px)',
             fontWeight: 400,
-            letterSpacing: '0.42em',
+            // 29 uppercase characters at 0.42em is 320px inside a 344px
+            // column. The tracking is what runs out first, not the size.
+            letterSpacing: 'clamp(0.18em, 1.2vw, 0.42em)',
             textTransform: 'uppercase',
             color: 'rgba(198,214,255,0.92)',
           }}
@@ -109,7 +113,7 @@ export function TitleCard(): React.ReactElement {
           position: 'absolute',
           left: 0,
           right: 0,
-          bottom: '6vh',
+          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6dvh)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',

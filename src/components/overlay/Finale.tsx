@@ -4,6 +4,8 @@ import { GATES, WHITE_B, WAKE_A } from '../../config/timeline';
 import { useUpdate } from '../../lib/updateBus';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import { clamp, sstep } from '../../lib/math';
+import { canHover } from '../../hooks/useViewport';
+import { NARROW_ASPECT, viewport } from '../../state/viewport';
 import type { FrameState } from '../../state/frame';
 
 /**
@@ -81,7 +83,9 @@ export function Finale({
 
     setOpacity(cardRef.current, inDay ? 1 : 0);
 
-    const t1 = GATES.finaleTitle(p);
+    // The portrait shot has no ring to wait for, so its card comes up early.
+    const narrow = viewport.aspect < NARROW_ASPECT;
+    const t1 = GATES.finaleTitle(p, narrow);
     // A small overshoot on the way in, so the line lands rather than appears.
     const pop = t1 < 1 ? 0.6 + t1 * 0.5 - Math.sin(t1 * Math.PI) * 0.06 : 1;
     setOpacity(titleRef.current, t1);
@@ -91,10 +95,10 @@ export function Finale({
       `scale(${pop.toFixed(3)}) translateY(${((1 - t1) * 18).toFixed(1)}px)`,
     );
 
-    setOpacity(msgRef.current, GATES.finaleMessage(p));
-    setOpacity(creditRef.current, p >= WHITE_B ? GATES.finaleCredit(p) : 0);
+    setOpacity(msgRef.current, GATES.finaleMessage(p, narrow));
+    setOpacity(creditRef.current, p >= WHITE_B ? GATES.finaleCredit(p, narrow) : 0);
 
-    const rp = GATES.replayButton(p);
+    const rp = GATES.replayButton(p, narrow);
     setOpacity(replayRef.current, rp);
     setStyle(replayRef.current, 'pointerEvents', rp > 0.5 ? 'auto' : 'none');
   }, []);
@@ -196,7 +200,9 @@ export function Finale({
             margin: 0,
             fontFamily: "'Playfair Display', serif",
             fontWeight: 700,
-            fontSize: 'clamp(38px, 7vw, 108px)',
+            // 38px of Playfair 700 needs ~420px for this line and the phone
+            // column is 335px, so it broke to three. 30/8.5vw holds two.
+            fontSize: 'clamp(30px, 8.5vw, 108px)',
             lineHeight: 1.08,
             color: '#fff8ee',
             textShadow:
@@ -231,11 +237,15 @@ export function Finale({
           style={{
             display: 'flex',
             alignItems: 'center',
+            // Two tracked labels and a dot on one line is 300px-odd; on a
+            // phone they wrap rather than run off the side of the card.
+            flexWrap: 'wrap',
+            justifyContent: 'center',
             gap: 14,
             fontFamily: "'Poppins', sans-serif",
             fontSize: 11,
             fontWeight: 500,
-            letterSpacing: '0.28em',
+            letterSpacing: 'clamp(0.14em, 1.1vw, 0.28em)',
             textTransform: 'uppercase',
             color: '#fff4e2',
             textShadow: '0 2px 18px rgba(60,40,10,0.5)',
@@ -254,16 +264,22 @@ export function Finale({
         ref={replayRef}
         type="button"
         onClick={onReplay}
+        // `pointerleave` does not fire after a tap, so on a touch screen this
+        // button would simply stay in its hover colour for the rest of the
+        // film. Both handlers are skipped where hover is not a real state.
         onPointerEnter={(e) => {
+          if (!canHover()) return;
           e.currentTarget.style.background = 'rgba(255,250,240,0.45)';
         }}
         onPointerLeave={(e) => {
+          if (!canHover()) return;
           e.currentTarget.style.background = 'rgba(255,250,240,0.28)';
         }}
+        className="tap-target"
         style={{
           position: 'absolute',
-          right: 22,
-          top: 22,
+          right: 'calc(env(safe-area-inset-right, 0px) + clamp(12px, 3vw, 22px))',
+          top: 'calc(env(safe-area-inset-top, 0px) + clamp(12px, 3vw, 22px))',
           pointerEvents: 'none',
           opacity: 0,
           cursor: 'pointer',

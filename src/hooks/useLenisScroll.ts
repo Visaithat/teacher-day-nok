@@ -7,6 +7,18 @@ import { frame } from '../state/frame';
 gsap.registerPlugin(ScrollTrigger);
 
 /**
+ * A mobile URL bar collapsing is a resize, and with `invalidateOnRefresh` set
+ * on the timeline below every one of them recomputes `max` against a 3200vh
+ * spacer that just changed height - so the film jumps mid-scroll, repeatedly,
+ * for the whole of a phone's first swipe. The scroll extent in CSS pixels has
+ * not really changed, so ignoring that particular resize is not a compromise.
+ *
+ * It is global config rather than a trigger option, which is why it is here
+ * beside the plugin registration and not in the timeline.
+ */
+ScrollTrigger.config({ ignoreMobileResize: true });
+
+/**
  * The single source of scroll for the whole film.
  *
  * Lenis owns smooth scrolling; ONE GSAP timeline is scrubbed by it and its
@@ -26,8 +38,24 @@ gsap.registerPlugin(ScrollTrigger);
  *    dt-corrected damp.
  */
 export interface LenisController {
-  /** Lock or release the page scroll (Scene 1 holds it locked). */
+  /**
+   * Lock or release the page scroll. Scene 1 holds it locked.
+   *
+   * RELEASING REWINDS. For this control "unlock" means "the film starts now",
+   * so it asserts the offset back to zero on the way out. That is the gift
+   * handoff, not a general-purpose resume - see `setPaused`.
+   */
   setLocked: (locked: boolean) => void;
+  /**
+   * Freeze the film where it stands, and carry on from exactly there.
+   *
+   * The phone's message dialog holds this while it is open: the film is
+   * scroll-driven, so without it a scroll behind the card would change which
+   * student the reader is looking at. Touches neither the offset nor the
+   * scrubbed timeline, so closing the card does not cost the viewer their
+   * place.
+   */
+  setPaused: (paused: boolean) => void;
   /** Jump back to the top, for Replay. */
   scrollToTop: () => void;
 }
@@ -42,6 +70,10 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
       wheelMultiplier: 1,
       touchMultiplier: 1.4,
       smoothWheel: true,
+      // Stated rather than inherited. Touch scrolling stays native and Lenis
+      // only observes it: hijacking it would fight the browser's own
+      // fling physics and, on iOS, the URL-bar collapse that rides on them.
+      syncTouch: false,
     });
 
     const onLenisScroll = () => ScrollTrigger.update();
@@ -74,6 +106,8 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
     });
 
     let locked = false;
+    /** A dialog holding the film still. Independent of `locked`. */
+    let paused = false;
 
     /**
      * Put the document, Lenis, the timeline and the frame all back at zero.
@@ -93,23 +127,53 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
       ScrollTrigger.update();
     };
 
+    /**
+     * Apply the two independent holds.
+     *
+     * Scene 1's lock and the dialog's pause know nothing about each other;
+     * only this does. Keeping them separate is what stops a pause from ever
+     * reaching `toTop()` - and stops a resume from starting Lenis behind
+     * Scene 1's back while it still holds the film at the gift box.
+     *
+     * `overflow: hidden` is the part that actually stops a finger. Lenis runs
+     * with `syncTouch: false`, so touch scrolling is native and `lenis.stop()`
+     * only blocks the virtual wheel path.
+     */
+    const applyHold = (): void => {
+      if (locked || paused) {
+        lenis.stop();
+        document.documentElement.style.overflow = 'hidden';
+      } else {
+        document.documentElement.style.overflow = '';
+        lenis.start();
+        // `update`, never `refresh`. Nothing a refresh recomputes has changed,
+        // and with `invalidateOnRefresh` on a 3200vh spacer it is exactly the
+        // mid-scroll jump `ignoreMobileResize` above exists to suppress.
+        ScrollTrigger.update();
+      }
+    };
+
     controller.current = {
       setLocked: (next: boolean) => {
         if (next === locked) return;
         locked = next;
         if (next) {
-          lenis.stop();
-          document.documentElement.style.overflow = 'hidden';
-        } else {
-          document.documentElement.style.overflow = '';
-          // Releasing the scroll always means "the film starts now", so the
-          // offset is zero by definition. Assert it rather than trust it: the
-          // refresh below reads the document's real scroll position, and this
-          // is the last moment a restore could still be sitting in it.
-          toTop();
-          lenis.start();
-          ScrollTrigger.refresh();
+          applyHold();
+          return;
         }
+        document.documentElement.style.overflow = '';
+        // Releasing the scroll always means "the film starts now", so the
+        // offset is zero by definition. Assert it rather than trust it: the
+        // refresh below reads the document's real scroll position, and this
+        // is the last moment a restore could still be sitting in it.
+        toTop();
+        applyHold();
+        ScrollTrigger.refresh();
+      },
+      setPaused: (next: boolean) => {
+        if (next === paused) return;
+        paused = next;
+        applyHold();
       },
       scrollToTop: toTop,
     };

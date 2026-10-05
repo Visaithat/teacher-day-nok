@@ -69,6 +69,16 @@ export const MSG_DRAW = 0.007;
 /** Scene 7: "Happy Teacher's Day!" pops in together. */
 export const BIG_A = 0.988;
 
+/**
+ * ...and where it pops in on a PORTRAIT frame, which plays Scene 7 as the sky
+ * and the card alone - no ring of students, no callouts (see `DayScene` and
+ * `FloatingLines`). Waiting for `BIG_A` there would leave 2.6 screens of
+ * scroll with nothing in the sky but petals, so the card comes up one short
+ * beat after the eyes have opened: `WAKE_B` is 0.945, and the petals are in
+ * from 0.944.
+ */
+export const BIG_A_NARROW = 0.958;
+
 // ------------------------------------------------------------ street layout
 
 /** World units between students down the street. */
@@ -290,10 +300,27 @@ export const GATES = {
    * p = 0.9895 against a gate that closed at 0.988.
    */
   floatingLinesOn: (p: number) => p >= WHITE_B && p >= MSG_A - 0.004,
-  finaleTitle: (p: number) => sstep(BIG_A, BIG_A + 0.007, p),
-  finaleMessage: (p: number) => sstep(0.994, 0.999, p),
-  finaleCredit: (p: number) => sstep(0.997, 1.0, p),
-  replayButton: (p: number) => sstep(0.998, 1.0, p),
+  /**
+   * The closing card, in four parts. `narrow` is the portrait shot, which
+   * starts the same sequence at `BIG_A_NARROW` instead; the offsets between
+   * the parts are the same either way, so the card builds at the same pace.
+   */
+  finaleTitle: (p: number, narrow = false) => {
+    const a = narrow ? BIG_A_NARROW : BIG_A;
+    return sstep(a, a + 0.007, p);
+  },
+  finaleMessage: (p: number, narrow = false) => {
+    const a = narrow ? BIG_A_NARROW : BIG_A;
+    return sstep(a + 0.006, a + 0.011, p);
+  },
+  finaleCredit: (p: number, narrow = false) => {
+    const a = narrow ? BIG_A_NARROW : BIG_A;
+    return sstep(a + 0.009, a + 0.012, p);
+  },
+  replayButton: (p: number, narrow = false) => {
+    const a = narrow ? BIG_A_NARROW : BIG_A;
+    return sstep(a + 0.01, a + 0.012, p);
+  },
 } as const;
 
 // --------------------------------------------------------------- constants
