@@ -62,6 +62,10 @@ export const COPY = {
   journeyLabel: 'THE JOURNEY',
   soundOn: 'Sound on',
   soundOff: 'Sound off',
+
+  /** A phone or tablet's way through the film, in place of scrolling. */
+  stepNext: 'Next',
+  stepBack: 'Back',
 } as const;
 
 /**

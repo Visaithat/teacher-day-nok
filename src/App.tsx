@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { ACESFilmicToneMapping } from 'three';
 import { Orchestrator } from './scenes/Orchestrator';
@@ -21,9 +21,11 @@ import { MuteButton } from './components/overlay/MuteButton';
 import { CursorTrail } from './components/overlay/CursorTrail';
 import { Finale } from './components/overlay/Finale';
 import { FloatingLines } from './components/overlay/FloatingLines';
+import { StepNav } from './components/overlay/StepNav';
 import { useLenisScroll } from './hooks/useLenisScroll';
 import { useReducedMotion } from './hooks/useReducedMotion';
 import { usePointerTracking } from './hooks/usePointerTracking';
+import { useStepNav } from './hooks/useStepNav';
 import { useYouTubePlayer } from './components/musicbox/useYouTubePlayer';
 import { musicBoxHit } from './components/musicbox/musicBoxHit';
 import { QUALITY } from './config/quality';
@@ -39,6 +41,12 @@ export default function App(): React.ReactElement {
   const scroll = useLenisScroll();
   const stageRef = useRef<HTMLDivElement>(null);
   usePointerTracking(stageRef);
+  // The phone's message dialog holding the film. A ref for the swipe handler,
+  // which runs outside React; state for the controls, which hide meanwhile.
+  const heldRef = useRef(false);
+  const [held, setHeld] = useState(false);
+  const nav = useStepNav(scroll, stageRef, heldRef);
+  const { swipedJustNow } = nav;
 
   const quality = useUIStore((s) => s.quality);
   const booted = useUIStore((s) => s.booted);
@@ -84,6 +92,8 @@ export default function App(): React.ReactElement {
         openGift();
         return;
       }
+      // The tail of a swipe on a touch screen, not a tap on the music box.
+      if (swipedJustNow()) return;
       if (frame.hoverMusicBox) {
         openMusicBox();
         return;
@@ -103,7 +113,7 @@ export default function App(): React.ReactElement {
       const ndcY = -((e.clientY - r.top) / r.height) * 2 + 1;
       if (test(ndcX, ndcY)) openMusicBox();
     },
-    [openGift, openMusicBox],
+    [openGift, openMusicBox, swipedJustNow],
   );
 
   useEffect(() => {
@@ -143,8 +153,10 @@ export default function App(): React.ReactElement {
    * would send the reader back to the gift box every time they closed a letter.
    */
   const onHold = useCallback(
-    (held: boolean) => {
-      scroll.current?.setPaused(held);
+    (next: boolean) => {
+      heldRef.current = next;
+      setHeld(next);
+      scroll.current?.setPaused(next);
     },
     [scroll],
   );
@@ -200,6 +212,7 @@ export default function App(): React.ReactElement {
           <StudentPanel />
           <FloatingLines />
           <Finale onReplay={onReplay} />
+          {nav.touch ? <StepNav next={nav.next} back={nav.back} hidden={held} /> : null}
           <NowPlaying />
           <ProgressRail />
           <MuteButton onToggle={onMute} />

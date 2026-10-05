@@ -33,6 +33,11 @@ export interface UIState {
    * unread dot until its bit is set.
    */
   readMask: number;
+  /**
+   * On a touch screen, the stop (`stepStops`) the film is parked at or
+   * playing toward, or -1 before it has gone to the first one.
+   */
+  stepIndex: number;
 
   setProgress: (v: number) => void;
   setBooted: (v: boolean) => void;
@@ -44,6 +49,7 @@ export interface UIState {
   setQuality: (q: QualityTier) => void;
   setPendingOpen: (v: boolean) => void;
   markRead: (i: number) => void;
+  setStepIndex: (i: number) => void;
   /** Reset everything the Replay button should undo. */
   replay: () => void;
 }
@@ -64,6 +70,7 @@ export const useUIStore = create<UIState>((set) => ({
   quality: initialTier(),
   pendingOpen: false,
   readMask: 0,
+  stepIndex: -1,
 
   setProgress: (v) => set({ progress: v }),
   setBooted: (v) => set({ booted: v }),
@@ -76,7 +83,8 @@ export const useUIStore = create<UIState>((set) => ({
   setPendingOpen: (v) => set({ pendingOpen: v }),
   markRead: (i) =>
     set((s) => (s.readMask & (1 << i) ? s : { readMask: s.readMask | (1 << i) })),
+  setStepIndex: (i) => set((s) => (s.stepIndex === i ? s : { stepIndex: i })),
 
   // The dots come back too: a replayed film has five unread messages again.
-  replay: () => set({ musicOn: false, activeStudent: -1, readMask: 0 }),
+  replay: () => set({ musicOn: false, activeStudent: -1, readMask: 0, stepIndex: -1 }),
 }));

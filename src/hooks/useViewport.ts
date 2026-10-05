@@ -33,6 +33,13 @@ export interface Viewport {
    * driven by its trackpad keeps the desktop card.
    */
   sheet: boolean;
+  /**
+   * A phone or tablet: the primary pointer is a finger, coarse and unable to
+   * hover. Such a screen does not scroll the film - it plays it stop to stop
+   * (see `stepStops`). A narrow desktop window, or a touch laptop driven by
+   * its trackpad, still scrolls.
+   */
+  touch: boolean;
 }
 
 const QUERIES = {
@@ -42,11 +49,12 @@ const QUERIES = {
   coarse: '(pointer: coarse)',
   sheet:
     '(max-width: 640px), (orientation: portrait) and (max-width: 760px), (pointer: coarse) and (hover: none)',
+  touch: '(pointer: coarse) and (hover: none)',
 } as const;
 
 function measure(): Viewport {
   if (typeof window === 'undefined' || !window.matchMedia) {
-    return { size: 'desktop', portrait: false, coarse: false, sheet: false };
+    return { size: 'desktop', portrait: false, coarse: false, sheet: false, touch: false };
   }
   const phone = window.matchMedia(QUERIES.phone).matches;
   const tablet = window.matchMedia(QUERIES.tablet).matches;
@@ -55,6 +63,7 @@ function measure(): Viewport {
     portrait: window.matchMedia(QUERIES.portrait).matches,
     coarse: window.matchMedia(QUERIES.coarse).matches,
     sheet: window.matchMedia(QUERIES.sheet).matches,
+    touch: window.matchMedia(QUERIES.touch).matches,
   };
 }
 

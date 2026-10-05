@@ -17,14 +17,14 @@ import type { FrameState } from '../../state/frame';
  * fill is a `scaleY` and the dot a `translateY`, both composited on the GPU;
  * the track height is measured once and re-measured only on resize.
  */
-export function ProgressRail(): React.ReactElement {
+export function ProgressRail(): React.ReactElement | null {
   const wrapRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
   const dotRef = useRef<HTMLDivElement>(null);
   const trackHeight = useRef(0);
   const unlocked = useUIStore((s) => s.unlocked);
-  const { size, coarse } = useViewport();
+  const { size, coarse, touch } = useViewport();
   const unlockedRef = useRef(unlocked);
   unlockedRef.current = unlocked;
 
@@ -61,6 +61,10 @@ export function ProgressRail(): React.ReactElement {
   }, []);
 
   useUpdate('overlay', update);
+
+  // A phone or tablet plays the film stop to stop, and the dots in `StepNav`
+  // are its rail. Two progress indicators would be one too many.
+  if (touch) return null;
 
   return (
     <div

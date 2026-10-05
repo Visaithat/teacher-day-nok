@@ -56,9 +56,30 @@ export interface LenisController {
    * place.
    */
   setPaused: (paused: boolean) => void;
+  /**
+   * Take the scroll away from the finger, for good, on a touch screen.
+   *
+   * A phone does not scroll this film; it plays between stops on a swipe or a
+   * button (see `stepStops`). That is a third hold, independent of the other
+   * two, so closing the message dialog - which releases `paused` - can never
+   * hand finger-scrolling back.
+   */
+  setStepped: (stepped: boolean) => void;
+  /**
+   * Play the film to progress `p` over `duration` seconds, or jump there.
+   *
+   * Driven through the real scroll offset rather than by writing
+   * `frame.target`, so the timeline, every gate and every later
+   * `ScrollTrigger.refresh` all agree on where the film is. Works while held.
+   */
+  scrollToProgress: (p: number, opts?: { duration?: number; immediate?: boolean }) => void;
   /** Jump back to the top, for Replay. */
   scrollToTop: () => void;
 }
+
+/** Slow out of the stop, slow into the next one. */
+const easeInOutCubic = (t: number): number =>
+  t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 
 export function useLenisScroll(): React.RefObject<LenisController | null> {
   const controller = useRef<LenisController | null>(null);
@@ -108,6 +129,14 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
     let locked = false;
     /** A dialog holding the film still. Independent of `locked`. */
     let paused = false;
+    /** A touch screen, playing stop to stop. Independent of both. */
+    let stepped = false;
+    /**
+     * Where `scrollToProgress` last sent the film. A rotation changes the
+     * viewport height, and with it how many pixels one unit of progress is,
+     * so a stepped film is put back here after every refresh.
+     */
+    let parkedAt = 0;
 
     /**
      * Put the document, Lenis, the timeline and the frame all back at zero.
@@ -124,23 +153,50 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
       proxy.value = 0;
       frame.target = 0;
       frame.p = 0;
+      parkedAt = 0;
       ScrollTrigger.update();
     };
 
+    /** The scroll offset that is progress `p`, at today's viewport height. */
+    const offsetFor = (p: number): number =>
+      p * Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+
+    const scrollToProgress = (
+      p: number,
+      { duration, immediate = false }: { duration?: number; immediate?: boolean } = {},
+    ): void => {
+      parkedAt = p;
+      lenis.scrollTo(offsetFor(p), {
+        immediate,
+        ...(duration === undefined ? {} : { duration }),
+        easing: easeInOutCubic,
+        // A held Lenis ignores `scrollTo` without it, and a stepped film is
+        // always held. Lenis still advances the animation while stopped.
+        force: true,
+      });
+    };
+
+    const onRefresh = (): void => {
+      if (stepped && !locked) scrollToProgress(parkedAt, { immediate: true });
+    };
+    ScrollTrigger.addEventListener('refresh', onRefresh);
+
     /**
-     * Apply the two independent holds.
+     * Apply the three independent holds.
      *
-     * Scene 1's lock and the dialog's pause know nothing about each other;
-     * only this does. Keeping them separate is what stops a pause from ever
-     * reaching `toTop()` - and stops a resume from starting Lenis behind
-     * Scene 1's back while it still holds the film at the gift box.
+     * Scene 1's lock, the dialog's pause and a touch screen's stepping know
+     * nothing about each other; only this does. Keeping them separate is what
+     * stops a pause from ever reaching `toTop()` - and stops a resume from
+     * starting Lenis behind Scene 1's back while it still holds the film at
+     * the gift box.
      *
      * `overflow: hidden` is the part that actually stops a finger. Lenis runs
      * with `syncTouch: false`, so touch scrolling is native and `lenis.stop()`
-     * only blocks the virtual wheel path.
+     * only blocks the virtual wheel path. (On iOS it is not enough on its own;
+     * a stepped page also gets `touch-action: none` on the stage, in CSS.)
      */
     const applyHold = (): void => {
-      if (locked || paused) {
+      if (locked || paused || stepped) {
         lenis.stop();
         document.documentElement.style.overflow = 'hidden';
       } else {
@@ -175,6 +231,13 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
         paused = next;
         applyHold();
       },
+      setStepped: (next: boolean) => {
+        if (next === stepped) return;
+        stepped = next;
+        document.documentElement.classList.toggle('stepped', next);
+        applyHold();
+      },
+      scrollToProgress,
       scrollToTop: toTop,
     };
 
@@ -209,6 +272,8 @@ export function useLenisScroll(): React.RefObject<LenisController | null> {
       controller.current = null;
       window.removeEventListener('load', resetIfLocked);
       window.removeEventListener('pageshow', onPageShow);
+      ScrollTrigger.removeEventListener('refresh', onRefresh);
+      document.documentElement.classList.remove('stepped');
       lenis.off('scroll', onLenisScroll);
       gsap.ticker.remove(raf);
       tl.scrollTrigger?.kill();

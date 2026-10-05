@@ -4,6 +4,7 @@ import { GATES } from '../../config/timeline';
 import { useUpdate } from '../../lib/updateBus';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import type { FrameState } from '../../state/frame';
+import { useViewport } from '../../hooks/useViewport';
 
 /**
  * "Happy Teacher's Day" over the night sky, plus the scroll hint.
@@ -18,6 +19,8 @@ export function TitleCard(): React.ReactElement {
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const subRef = useRef<HTMLParagraphElement>(null);
   const hintRef = useRef<HTMLDivElement>(null);
+  // No "scroll" on a touch screen: it does not scroll there (`StepNav`).
+  const { touch } = useViewport();
 
   const update = useCallback((f: FrameState) => {
     const { p } = f;
@@ -107,40 +110,42 @@ export function TitleCard(): React.ReactElement {
         </p>
       </div>
 
-      <div
-        ref={hintRef}
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6dvh)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 10,
-          opacity: 0,
-          pointerEvents: 'none',
-        }}
-      >
-        <span
+      {touch ? null : (
+        <div
+          ref={hintRef}
           style={{
-            fontSize: 10,
-            letterSpacing: '0.36em',
-            textTransform: 'uppercase',
-            color: 'rgba(214,226,255,0.75)',
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6dvh)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 10,
+            opacity: 0,
+            pointerEvents: 'none',
           }}
         >
-          {COPY.scrollHint}
-        </span>
-        <span
-          style={{
-            width: 1,
-            height: 46,
-            background: 'linear-gradient(rgba(214,226,255,0.9), rgba(214,226,255,0))',
-            animation: 'tdPulse 2.2s ease-in-out infinite',
-          }}
-        />
-      </div>
+          <span
+            style={{
+              fontSize: 10,
+              letterSpacing: '0.36em',
+              textTransform: 'uppercase',
+              color: 'rgba(214,226,255,0.75)',
+            }}
+          >
+            {COPY.scrollHint}
+          </span>
+          <span
+            style={{
+              width: 1,
+              height: 46,
+              background: 'linear-gradient(rgba(214,226,255,0.9), rgba(214,226,255,0))',
+              animation: 'tdPulse 2.2s ease-in-out infinite',
+            }}
+          />
+        </div>
+      )}
     </>
   );
 }

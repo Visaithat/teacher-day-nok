@@ -1,4 +1,4 @@
-import { STUDENT_COUNT } from './students';
+import { STUDENTS, STUDENT_COUNT } from './students';
 import { clamp, sstep } from '../lib/math';
 
 /**
@@ -205,6 +205,77 @@ export function studentPhase(p: number): StudentPhase {
     sstep(s.holdOut, 0.97, t);
 
   return { idx, hold, notice: Math.max(notice, hold), walk: clamp(walk, 0, 1) };
+}
+
+/**
+ * The middle of student `i`'s fully-held close-up: where `hold` is exactly 1,
+ * from the end of the push-in to the start of the pull-back.
+ *
+ * Read off the same `SLOT_BOUNDS` and slot shapes `studentPhase` uses, so a
+ * stop parked here is on the held shot by construction - retune a slot and
+ * the stop moves with it.
+ */
+export function holdCentre(i: number): number {
+  const slot = SLOT_BOUNDS[i] as SlotBound;
+  const s = slotShape(i);
+  return slot.a + slot.span * ((s.pushEnd + s.holdOut) / 2);
+}
+
+// ------------------------------------------------------------ touch stops
+
+/**
+ * One place a phone or tablet parks the film. See `stepStops`.
+ */
+export interface StepStop {
+  /** Film progress to park at. */
+  readonly p: number;
+  /** For the dots' accessible names. */
+  readonly label: string;
+  /** Seconds to play from the stop before this one. Omit for the default. */
+  readonly into?: number;
+}
+
+/** Seconds of film per unit of progress, between stops. */
+const STEP_SECONDS_PER_P = 35;
+const STEP_MIN_S = 1.5;
+const STEP_MAX_S = 6;
+
+/**
+ * Where a touch screen stops, in order.
+ *
+ * A phone does not scroll this film: finger-scrolling 31 screens to reach the
+ * fifth student was the complaint. Instead it plays from stop to stop on a
+ * swipe or a tap of Next, and waits. Each stop is a shot that holds - the
+ * title fully lit, the city under its caption, the gate, each student at the
+ * middle of their close-up, and the finale.
+ *
+ * The finale is two stops where the ring is shown and one where it is not.
+ * The wide shot draws its five callouts one after another over MSG_A..MSG_B,
+ * and played at the default pace those would all arrive in about a second and
+ * a half, so it waits with the eyes open first and then takes its time. The
+ * portrait shot has no callouts (`FloatingLines`) and stops as soon as the
+ * closing card and Replay are fully in.
+ */
+export function stepStops(narrow: boolean): readonly StepStop[] {
+  const students: StepStop[] = STUDENTS.map((s, i) => ({ p: holdCentre(i), label: s.en }));
+  const finale: StepStop[] = narrow
+    ? [{ p: BIG_A_NARROW + 0.014, label: 'Finale' }]
+    : [
+        { p: WAKE_B, label: 'Wake' },
+        { p: 1, label: 'Finale', into: 9 },
+      ];
+  return [
+    { p: 0.165, label: 'Title' },
+    { p: 0.305, label: 'The City' },
+    { p: 0.495, label: 'The Gate' },
+    ...students,
+    ...finale,
+  ];
+}
+
+/** How long to play from `from` to `stop`. */
+export function stepSeconds(from: number, stop: StepStop): number {
+  return stop.into ?? clamp(Math.abs(stop.p - from) * STEP_SECONDS_PER_P, STEP_MIN_S, STEP_MAX_S);
 }
 
 /**
