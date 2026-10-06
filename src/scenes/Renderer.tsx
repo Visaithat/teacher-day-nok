@@ -4,9 +4,12 @@ import { Vector2 } from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { renderTargets } from './renderTargets';
+import { bindPrewarm } from './prewarm';
+import { drainGpuQueue } from '../lib/gpuQueue';
 import { frame } from '../state/frame';
 import { GATES, WHITE_B } from '../config/timeline';
 import { lerp } from '../lib/math';
@@ -35,6 +38,38 @@ import { useUIStore } from '../state/useUIStore';
  * three's own BokehPass and UnrealBloomPass are used rather than the pmndrs
  * equivalents specifically to keep the look identical to the design.
  */
+
+/**
+ * What the bokeh pass does to a frame when its aperture is zero, and nothing
+ * else: every one of its 41 taps lands on the same texel, so the colour comes
+ * out as it went in - less whatever the GPU loses averaging 41 copies of one
+ * number, which measures as one level in 255 on a few percent of pixels - and
+ * alpha comes out as 1.
+ *
+ * That alpha is not incidental. The night is full of additive sprites, which
+ * push alpha in the half-float buffer past 1, and bloom weights its own
+ * contribution by the alpha it is handed. Simply skipping the bokeh pass
+ * would make every lamp halo bloom harder. So when there is no blur to do,
+ * this stands in for it: one texture read per pixel instead of forty-one and
+ * a second render of the whole scene for depth.
+ */
+const OpaqueCopyShader = {
+  name: 'OpaqueCopyShader',
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    void main() {
+      gl_FragColor = vec4( texture2D( tDiffuse, vUv ).rgb, 1.0 );
+    }`,
+};
+
 export function Renderer(): null {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
@@ -56,13 +91,29 @@ export function Renderer(): null {
     });
     composer.addPass(bokeh);
 
+    // The depth render inside the bokeh pass is a second `renderer.render`,
+    // and every `render` redraws the shadow maps first. Nothing moved between
+    // the two, so the second set is the first set again.
+    const renderBokeh = bokeh.render.bind(bokeh);
+    bokeh.render = (renderer, writeBuffer, readBuffer, deltaTime, maskActive) => {
+      const auto = renderer.shadowMap.autoUpdate;
+      renderer.shadowMap.autoUpdate = false;
+      renderBokeh(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+      renderer.shadowMap.autoUpdate = auto;
+    };
+
+    // Runs in the bokeh pass's place whenever its aperture is zero.
+    const opaque = new ShaderPass(OpaqueCopyShader);
+    opaque.enabled = false;
+    composer.addPass(opaque);
+
     const bloom = new UnrealBloomPass(new Vector2(1, 1), 0.32, 0.42, 0.9);
     bloom.strength = DEFAULT_PROPS.bloomStrength;
     composer.addPass(bloom);
 
     composer.addPass(new OutputPass());
 
-    return { composer, renderPass, bokeh, bloom };
+    return { composer, renderPass, bokeh, opaque, bloom };
   }, [gl, scene, camera]);
 
   // `dpr` is read during render so it can be a dependency. It currently only
@@ -88,10 +139,19 @@ export function Renderer(): null {
     [rig],
   );
 
+  useEffect(() => {
+    bindPrewarm({ gl, scene, camera, ...rig });
+    return () => bindPrewarm(null);
+  }, [rig, gl, scene, camera]);
+
   useFrame(() => {
     const { p } = frame;
-    const { composer, renderPass, bokeh, bloom } = rig;
+    const { composer, renderPass, bokeh, opaque, bloom } = rig;
     const uniforms = bokeh.materialBokeh.uniforms;
+
+    // Queued uploads, before anything is drawn. The frame counts as covered
+    // while the white-out is solid: whatever this costs then, nobody sees.
+    drainGpuQueue(GATES.whiteCover(p) >= 0.98);
 
     // ---- Scene 1: the gift box, before the burst hands over ----------------
     const giftScene = renderTargets.giftScene;
@@ -131,8 +191,12 @@ export function Renderer(): null {
       // runs on every tier — unlike the street's DOF, which is a luxury.
       // Halved with the exposure and bloom: defocus over a blown-out frame is
       // the third of the three things that were flattening the models.
-      if (aperture) aperture.value = 0.0006 * (1 - wake);
+      const blur = 0.0006 * (1 - wake);
+      if (aperture) aperture.value = blur;
       if (maxblur) maxblur.value = 0.02;
+      // Eyes open, nothing left to defocus: the rest of the finale is sharp.
+      bokeh.enabled = blur > 0;
+      opaque.enabled = !bokeh.enabled;
 
       composer.render();
       return;
@@ -153,7 +217,13 @@ export function Renderer(): null {
     const maxblur = uniforms['maxblur'];
     if (maxblur) maxblur.value = 0.006;
     if (focus) focus.value = lerp(focus.value as number, frame.dofFocusTarget, 0.06);
-    if (aperture) aperture.value = settings.depthOfField ? GATES.dofAperture(p) : 0;
+    const blur = settings.depthOfField ? GATES.dofAperture(p) : 0;
+    if (aperture) aperture.value = blur;
+    // Zero outside the street, and on the low tier everywhere. The focus
+    // above keeps easing regardless, so it is already on the student when
+    // the aperture opens.
+    bokeh.enabled = blur > 0;
+    opaque.enabled = !bokeh.enabled;
 
     composer.render();
   }, 1);

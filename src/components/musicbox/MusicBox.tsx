@@ -21,11 +21,12 @@ import { INTRO_FIT } from '../../config/cameraKeys';
 import { prompt } from '../../config/copy';
 import { readViewport } from '../../hooks/useViewport';
 import { musicBoxHit } from './musicBoxHit';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightEdge, useNightUpdate } from '../../scenes/nightVisibility';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import { frame, type FrameState } from '../../state/frame';
+import { viewport } from '../../state/viewport';
 
 const BOX_POSITION = new Vector3(4.4, 0, 58);
 const HINT_HEIGHT = 4.4;
@@ -184,15 +185,40 @@ export function MusicBox(): React.ReactElement {
         const visible = near > 0.05 && !open && scratchProject.z < 1;
         setOpacity(el, visible ? near : 0);
         if (visible) {
-          setStyle(el, 'left', `${clamp((scratchProject.x * 0.5 + 0.5) * 100, 16, 84).toFixed(2)}%`);
-          setStyle(el, 'top', `${clamp((-scratchProject.y * 0.5 + 0.5) * 100, 12, 88).toFixed(2)}%`);
+          // One `transform`, not `left`/`top`: those are layout properties,
+          // and this is written on every frame the camera moves. The second
+          // half of each term is the pill's own anchoring, which used to be
+          // the stylesheet's `translate(-50%, -100%)`.
+          const x = clamp(scratchProject.x * 0.5 + 0.5, 0.16, 0.84) * viewport.w;
+          const y = clamp(-scratchProject.y * 0.5 + 0.5, 0.12, 0.88) * viewport.h;
+          setStyle(
+            el,
+            'transform',
+            `translate(calc(${x.toFixed(1)}px - 50%), calc(${y.toFixed(1)}px - 100%))`,
+          );
         }
       }
     },
     [camera, glowMat, motes, raycaster],
   );
 
-  useUpdate('musicbox', update);
+  useNightUpdate('garden', 'musicbox', update);
+
+  // The update above stops once the garden is hidden, so the two things it
+  // was still holding are let go here; they used to go with the unmount.
+  const edge = useMemo(
+    () => ({
+      onShow: () => {
+        hoverRef.current = 0;
+      },
+      onHide: () => {
+        setOpacity(hintRef.current, 0);
+        frame.hoverMusicBox = false;
+      },
+    }),
+    [],
+  );
+  useNightEdge('garden', edge);
 
   return (
     <group position={BOX_POSITION.toArray()} rotation-y={-0.34}>

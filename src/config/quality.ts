@@ -92,17 +92,33 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
   },
 };
 
+const LADDER: readonly QualityTier[] = ['low', 'medium', 'high'];
+
 /** The source's own mobile test, kept verbatim. */
 export function isMobileDevice(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(max-width: 820px), (pointer: coarse)').matches;
 }
 
-export function initialTier(): QualityTier {
-  return isMobileDevice() ? 'low' : 'high';
+/**
+ * `?perf&tier=low` holds the film on one tier, for measurement.
+ *
+ * The ladder moves with the frame rate, so two runs of the same build can end
+ * on different tiers and stop being comparable - and a screenshot diff across
+ * a change of pixel ratio compares nothing at all. Only honoured alongside
+ * `?perf`, so no ordinary link can pin a visitor's quality.
+ */
+export function pinnedTier(): QualityTier | null {
+  if (typeof window === 'undefined') return null;
+  const q = new URLSearchParams(window.location.search);
+  const tier = q.get('tier');
+  if (!q.has('perf') || !tier) return null;
+  return (LADDER as readonly string[]).includes(tier) ? (tier as QualityTier) : null;
 }
 
-const LADDER: readonly QualityTier[] = ['low', 'medium', 'high'];
+export function initialTier(): QualityTier {
+  return pinnedTier() ?? (isMobileDevice() ? 'low' : 'high');
+}
 
 export function stepTier(current: QualityTier, direction: 1 | -1): QualityTier {
   const i = LADDER.indexOf(current);

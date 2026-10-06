@@ -133,5 +133,23 @@ export function resetFrame(): void {
   frame.musicBoxOpenedAt = 0;
 }
 
-// TEMP DEV PROBE — removed before hand-off.
-if (import.meta.env.DEV) (globalThis as unknown as Record<string, unknown>)['__frame'] = frame;
+/**
+ * Measurement hooks. Inert unless something sets them.
+ *
+ * `freezeTime` pins `frame.time` while `dt` keeps running, so everything that
+ * oscillates on the clock - flicker, wind, breathing - holds one pose and two
+ * builds can be screenshotted at the same `p` and compared pixel for pixel,
+ * while the damped values still settle.
+ */
+export const frameDebug: { freezeTime: number | null } = { freezeTime: null };
+
+/** `?perf` on the URL exposes the probes in any build, as it does the HUD. */
+const probed =
+  import.meta.env.DEV ||
+  (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf'));
+
+if (probed) {
+  const g = globalThis as unknown as Record<string, unknown>;
+  g['__frame'] = frame;
+  g['__frameDebug'] = frameDebug;
+}

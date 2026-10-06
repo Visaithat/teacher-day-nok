@@ -11,7 +11,7 @@ import vertexShader from '../../shaders/stars.vert.glsl?raw';
 import fragmentShader from '../../shaders/stars.frag.glsl?raw';
 import { makeRandom } from '../../lib/math';
 import { GATES } from '../../config/timeline';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
 import { useUIStore } from '../../state/useUIStore';
 import { QUALITY } from '../../config/quality';
 import { DEFAULT_PROPS } from '../../config/copy';
@@ -155,7 +155,7 @@ export function Stars({ starDensity = DEFAULT_PROPS.starDensity }: { starDensity
     [material],
   );
 
-  useUpdate('world', update);
+  useNightUpdate('sky', 'world', update);
 
   return (
     <points ref={ref} geometry={geometry} material={material} frustumCulled={false} />

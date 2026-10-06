@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import {
   AdditiveBlending,
@@ -16,7 +16,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { useTextures } from '../../textures/TextureProvider';
 import { mat } from '../../lib/materials';
 import { GATES } from '../../config/timeline';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
 import { makeRandom } from '../../lib/math';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
@@ -267,6 +267,15 @@ export function Gate(): React.ReactElement {
     };
   }, [scene]);
 
+  // Allocate the lantern's shadow map now; the update below holds it still
+  // while the lantern is dark. See the walk light in `NightWorld`.
+  useEffect(() => {
+    if (!settings.shadows) return;
+    for (const light of throwRefs.current) {
+      if (light?.castShadow) light.shadow.needsUpdate = true;
+    }
+  }, [settings.shadows]);
+
   // ---------------------------------------------------------------- update
   const update = useCallback(
     (f: FrameState) => {
@@ -290,7 +299,11 @@ export function Gate(): React.ReactElement {
         const lamp = lampRefs.current[i];
         if (lamp) lamp.intensity = 90 * fl * on;
         const thrown = throwRefs.current[i];
-        if (thrown) thrown.intensity = 140 * fl * on;
+        if (thrown) {
+          thrown.intensity = 140 * fl * on;
+          // Off until the descent reaches the gate; see the walk light.
+          thrown.shadow.autoUpdate = thrown.intensity > 0;
+        }
         const bulb = bulbMatRefs.current[i];
         if (bulb) bulb.emissiveIntensity = 3.4 * fl * on;
         const bm = beamMats[i];
@@ -300,7 +313,7 @@ export function Gate(): React.ReactElement {
     [beamMats, phases],
   );
 
-  useUpdate('gate', update);
+  useNightUpdate('garden', 'gate', update);
 
   const woodPlate = useMemo(() => mat('wood', '#2a1a10'), []);
 

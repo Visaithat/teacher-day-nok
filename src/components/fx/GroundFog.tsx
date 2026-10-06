@@ -3,7 +3,7 @@ import { Group, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three';
 import { useTextures } from '../../textures/TextureProvider';
 import { GATES } from '../../config/timeline';
 import { makeRandom } from '../../lib/math';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import type { FrameState } from '../../state/frame';
@@ -60,7 +60,7 @@ export function GroundFog(): React.ReactElement {
     [material, planes],
   );
 
-  useUpdate('world', update);
+  useNightUpdate('night', 'world', update);
 
   return (
     <group ref={groupRef}>

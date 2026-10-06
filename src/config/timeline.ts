@@ -342,6 +342,20 @@ export const GATES = {
    * already blooming out before the overlay finishes the job.
    */
   whiteFlash: (p: number) => sstep(WHITE_A + 0.02, WHITE_B, p),
+  /**
+   * Opacity of the white DOM layer over the canvas, through the cut.
+   *
+   * Here rather than in `Finale`, which draws it, because the renderer needs
+   * the same number: while this is 1 nothing on the canvas can be seen, and
+   * that is when slow GPU work is free (`gpuQueue`).
+   */
+  whiteCover: (p: number) => {
+    const blow = sstep(WHITE_A + 0.02, WHITE_B, p);
+    return (
+      clamp(blow * blow * 0.9 - sstep(WAKE_A, WAKE_A + 0.02, p) * 0.9, 0, 1) +
+      (1 - sstep(WAKE_A, WAKE_A + 0.035, p)) * (p > WHITE_B ? 0.9 : 0)
+    );
+  },
   /** Scene 7 wake-up ramp. */
   wake: (p: number) => sstep(WAKE_A, WAKE_B, p),
   /** The day scene takes over the render slightly before the white peaks. */
@@ -411,32 +425,31 @@ export const STEP_FREQUENCY = 3.1;
 export const ACTIVE_HOLD_THRESHOLD = 0.22;
 
 /**
- * Mount windows. Each subsystem is unmounted outside its window; it is
- * invisible there anyway, so this removes cost without changing a frame.
+ * Stage windows. Each part of the night is hidden outside its window; it is
+ * out of shot there anyway, so this removes cost without changing a frame.
  * Windows overlap the gates above so nothing pops in mid-fade.
+ *
+ * Hidden, not unmounted: everything is built once at boot, and
+ * `scenes/nightVisibility.ts` flips `visible` from these. The finale ring is
+ * the one thing with no window - its five rigs have to exist while the street
+ * models are downloading, because that is when each student's finale mesh is
+ * fetched and attached (see `StudentRow`), and its scene is separate and only
+ * rendered from `WHITE_B`, so until then it costs memory and nothing else.
  */
 export const MOUNT = {
   nightWorld: (p: number) => p < 0.92,
-  /**
-   * The finale ring is built at boot, not when it is reached.
-   *
-   * Its five rigs have to exist while the street models are downloading,
-   * because that is when each student's finale mesh is fetched and attached
-   * (see `StudentRow`). Waiting until the white-out would mean starting five
-   * more downloads a fraction of a scroll before the ring is on screen, and
-   * showing blocky stand-ins until they arrived.
-   *
-   * Building them mid-scroll instead would just move the problem: three
-   * hundred meshes is a visible hitch wherever it lands. It belongs on the
-   * loader, with everything else. The scene is separate and only rendered
-   * from `WHITE_B`, so until then it costs memory and nothing else.
-   */
-  dayScene: () => true,
   sky: (p: number) => p < 0.62,
   gardenAndGate: (p: number) => p < 0.7,
   street: (p: number) => p > 0.44 && p < 0.9,
-  /** Only students within this many slots of the active one stay mounted. */
-  studentRadius: 2,
-  /** Models start downloading once the descent is underway. */
-  modelLoadStart: 0.3,
+  /**
+   * Models start downloading as soon as the loader lifts.
+   *
+   * Not for the download's sake. Each model is three large texture uploads
+   * that cannot be made quick, only well placed (`lib/gpuQueue.ts`), and the
+   * best place there is comes first: the gift box, where the frame is nearly
+   * still and waiting on a click. After it come the long holds on the title
+   * and the city. Starting at the descent, as this once did, left only the
+   * walk itself to do them in.
+   */
+  modelLoadStart: 0,
 } as const;

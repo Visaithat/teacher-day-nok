@@ -57,6 +57,16 @@ const MIN_FIT = 0.55;
  * again as the card turns over means the one moment it is read is the one
  * moment it is guaranteed to have just been measured.
  */
+/**
+ * Fits already solved, by letter, hand and card size.
+ *
+ * One solve is up to eight layouts of a page of wrapped Lao, about a tenth of
+ * a second all told - and the same letter on the same card always solves to
+ * the same number. Cleared when a font arrives, since that changes the metrics
+ * every entry was measured with.
+ */
+const fitCache = new Map<string, number>();
+
 function useFitLetter(
   page: React.RefObject<HTMLDivElement | null>,
   student: StudentConfig | undefined,
@@ -67,21 +77,70 @@ function useFitLetter(
     const el = page.current;
     if (!el) return;
 
+    let job = 0;
+    const cancel = () => {
+      if (job) cancelAnimationFrame(job);
+      job = 0;
+    };
+
     const overflows = (fit: number) => {
       el.style.setProperty('--fit', String(fit));
       return el.scrollHeight > el.clientHeight;
     };
-    const fit = () => {
-      if (!overflows(1)) return;
+    const keyNow = () =>
+      `${student?.en ?? ''}|${hand?.family ?? ''}|${el.clientWidth}x${el.clientHeight}`;
+
+    /**
+     * The bisection, as a list of probes to make one after another: each
+     * returns the next, or null when the answer has been written.
+     */
+    type Probe = () => Probe | null;
+    const solve = (key: string): Probe => {
       let lo = MIN_FIT;
       let hi = 1;
+      let i = 0;
+      const settle = (fit: number): null => {
+        el.style.setProperty('--fit', String(fit));
+        fitCache.set(key, fit);
+        return null;
+      };
       // Seven halvings land within 0.004 of the edge - well under a pixel.
-      for (let i = 0; i < 7; i++) {
+      const halve: Probe = () => {
+        if (i++ >= 7) return settle(lo);
         const mid = (lo + hi) / 2;
         if (overflows(mid)) hi = mid;
         else lo = mid;
+        return halve;
+      };
+      return () => (overflows(1) ? halve : settle(1));
+    };
+
+    const fit = () => {
+      cancel();
+      const key = keyNow();
+      const known = fitCache.get(key);
+      if (known !== undefined) {
+        el.style.setProperty('--fit', String(known));
+        return;
       }
-      el.style.setProperty('--fit', String(lo));
+
+      let probe: Probe | null = solve(key);
+      if (flipped) {
+        // Face up: the reader is looking at it, so it has to be right in this
+        // frame, whatever that costs.
+        while (probe) probe = probe();
+        return;
+      }
+      // Face down, which is how every letter arrives - and it arrives while
+      // the camera is still easing onto its student. Nobody can see the page,
+      // so the probes are taken one a frame instead of all in this one, and
+      // the answer is long since in by the time a hand reaches for the card.
+      const step = () => {
+        job = 0;
+        probe = probe ? probe() : null;
+        if (probe) job = requestAnimationFrame(step);
+      };
+      job = requestAnimationFrame(step);
     };
 
     fit();
@@ -92,10 +151,15 @@ function useFitLetter(
     ro.observe(el);
     // The Lao face is split by unicode-range and fetched only once Lao is
     // first laid out - i.e. after the first fit, which measured a fallback.
-    document.fonts.addEventListener('loadingdone', fit);
+    const refit = () => {
+      fitCache.clear();
+      fit();
+    };
+    document.fonts.addEventListener('loadingdone', refit);
     return () => {
+      cancel();
       ro.disconnect();
-      document.fonts.removeEventListener('loadingdone', fit);
+      document.fonts.removeEventListener('loadingdone', refit);
     };
   }, [page, student, hand, flipped]);
 }

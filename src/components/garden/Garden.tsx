@@ -20,7 +20,7 @@ import { mat } from '../../lib/materials';
 import { makeRandom } from '../../lib/math';
 import { GATES } from '../../config/timeline';
 import { INTRO_FIT } from '../../config/cameraKeys';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import type { FrameState } from '../../state/frame';
@@ -251,7 +251,7 @@ export function Garden(): React.ReactElement {
     [windUniforms, petals],
   );
 
-  useUpdate('gate', update);
+  useNightUpdate('garden', 'gate', update);
 
   const stoneMat = useMemo(() => mat('fabric', '#4a4038'), []);
   const woodMat = useMemo(() => mat('wood', '#4b3524'), []);

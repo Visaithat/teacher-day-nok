@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { AdditiveBlending, Color, Group, Sprite, SpriteMaterial } from 'three';
 import { useTextures } from '../../textures/TextureProvider';
 import { GATES } from '../../config/timeline';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightEdge, useNightUpdate } from '../../scenes/nightVisibility';
 import type { FrameState } from '../../state/frame';
 
 /** Seconds between one streak and the next, per star. */
@@ -70,7 +70,19 @@ export function ShootingStars(): React.ReactElement {
     [materials],
   );
 
-  useUpdate('world', update);
+  useNightUpdate('sky', 'world', update);
+
+  // The sky is hidden rather than rebuilt when the film is replayed, so the
+  // offsets it used to get back by being rebuilt are put back here.
+  const edge = useMemo(
+    () => ({
+      onShow: () => {
+        clocks.current = [-3, -9];
+      },
+    }),
+    [],
+  );
+  useNightEdge('sky', edge);
 
   return (
     <group ref={groupRef}>

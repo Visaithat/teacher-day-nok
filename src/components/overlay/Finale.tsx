@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { COPY, DEFAULT_PROPS } from '../../config/copy';
-import { GATES, WHITE_B, WAKE_A } from '../../config/timeline';
+import { GATES, WHITE_B } from '../../config/timeline';
 import { useUpdate } from '../../lib/updateBus';
 import { setOpacity, setStyle } from '../../lib/domWrite';
 import { clamp, sstep } from '../../lib/math';
@@ -57,15 +57,10 @@ export function Finale({
       return;
     }
 
-    const blow = GATES.whiteFlash(p);
     const wake = GATES.wake(p);
     const inDay = p > WHITE_B;
 
-    setOpacity(
-      whiteRef.current,
-      clamp(blow * blow * 0.9 - sstep(WAKE_A, WAKE_A + 0.02, p) * 0.9, 0, 1) +
-        (1 - sstep(WAKE_A, WAKE_A + 0.035, p)) * (inDay ? 0.9 : 0),
-    );
+    setOpacity(whiteRef.current, GATES.whiteCover(p));
 
     // The fourth and largest haze source: a 30vmax white inset glow over the
     // whole frame. Halved (was 0.85) along with the exposure, bloom and
@@ -164,6 +159,9 @@ export function Finale({
           pointerEvents: 'none',
           opacity: 0,
           boxShadow: 'inset 0 0 40vmax 30vmax rgba(255,250,240,1)',
+          // Its opacity is written every frame of the wake. On its own layer
+          // that is a blend; without one it is this shadow rasterised again.
+          willChange: 'opacity',
         }}
       />
 

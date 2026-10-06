@@ -26,6 +26,7 @@ import { useLenisScroll } from './hooks/useLenisScroll';
 import { useReducedMotion } from './hooks/useReducedMotion';
 import { usePointerTracking } from './hooks/usePointerTracking';
 import { useStepNav } from './hooks/useStepNav';
+import { useOverlayPreload } from './hooks/useOverlayPreload';
 import { useYouTubePlayer } from './components/musicbox/useYouTubePlayer';
 import { musicBoxHit } from './components/musicbox/musicBoxHit';
 import { QUALITY } from './config/quality';
@@ -41,6 +42,7 @@ export default function App(): React.ReactElement {
   const scroll = useLenisScroll();
   const stageRef = useRef<HTMLDivElement>(null);
   usePointerTracking(stageRef);
+  useOverlayPreload();
   // The phone's message dialog holding the film. A ref for the swipe handler,
   // which runs outside React; state for the controls, which hide meanwhile.
   const heldRef = useRef(false);
@@ -180,6 +182,12 @@ export default function App(): React.ReactElement {
           // of them reallocates the whole composer chain in `Renderer`. R3F's
           // own resize debounce is 0; this absorbs the churn.
           resize={{ debounce: 200, scroll: false }}
+          // The link-status and info-log reads three makes after every shader
+          // compile are synchronous round trips to the GPU process. They are
+          // for finding a broken shader, which is a development job.
+          onCreated={({ gl }) => {
+            gl.debug.checkShaderErrors = import.meta.env.DEV;
+          }}
           gl={{
             powerPreference: 'high-performance',
             // The composer renders to its own non-multisampled targets, so

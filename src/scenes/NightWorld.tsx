@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
-import { Color, DirectionalLight, FogExp2, PointLight, SpotLight } from 'three';
+import { Color, DirectionalLight, FogExp2, Group, PointLight, SpotLight } from 'three';
 import { Stars } from '../components/sky/Stars';
 import { Moon } from '../components/sky/Moon';
 import { ShootingStars } from '../components/sky/ShootingStars';
@@ -15,9 +15,8 @@ import { StudentRow } from '../components/students/StudentRow';
 import { GroundFog } from '../components/fx/GroundFog';
 import { Fireflies } from '../components/fx/Fireflies';
 import { NightEnvironment } from './NightEnvironment';
-import { GATES, MOUNT } from '../config/timeline';
-import { useUpdate } from '../lib/updateBus';
-import { useScrollWindow } from '../hooks/useScrollWindow';
+import { GATES } from '../config/timeline';
+import { useNightUpdate, useNightVisibility } from './nightVisibility';
 import { QUALITY } from '../config/quality';
 import { useUIStore } from '../state/useUIStore';
 import type { FrameState } from '../state/frame';
@@ -64,6 +63,15 @@ export function NightWorld(): React.ReactElement {
     };
   }, [scene]);
 
+  // The update below stops the walk light's shadow map refreshing while the
+  // light is dark, which it is from boot. One forced pass here allocates the
+  // map up front, so the frame the light comes on is not also the frame its
+  // render target is created.
+  useEffect(() => {
+    const light = walkLightRef.current;
+    if (light && settings.shadows) light.shadow.needsUpdate = true;
+  }, [settings.shadows]);
+
   const update = useCallback((f: FrameState) => {
     const { p } = f;
 
@@ -78,18 +86,26 @@ export function NightWorld(): React.ReactElement {
       walk.target.position.set(0, 0, z - 15);
       walk.target.updateMatrixWorld();
       walk.intensity = GATES.walkLight(p);
+      // Dark until the street and again after it, and a light that adds
+      // nothing has no use for a fresh shadow map. Not `castShadow`: that is
+      // part of every lit material's program key, and flipping it would
+      // recompile the scene.
+      walk.shadow.autoUpdate = walk.intensity > 0;
     }
   }, []);
 
-  useUpdate('world', update);
+  useNightUpdate('night', 'world', update);
 
-  // The sky is behind the camera once the descent finishes; unmounting it
-  // frees 11,000 points and a 160-segment moon for the rest of the film.
-  const showSky = useScrollWindow(MOUNT.sky);
-  // The garden and gate are behind the camera once it is down the street.
-  const showGarden = useScrollWindow(MOUNT.gardenAndGate);
-  // The students exist only for their stretch of the street.
-  const showStreet = useScrollWindow(MOUNT.street);
+  // Three parts of the night are only on stage for a stretch of the scroll:
+  // the sky is behind the camera once the descent finishes, the garden and
+  // gate once it is down the street, and the students exist only for their
+  // stretch of it. All three are built here, once, and hidden outside their
+  // windows - see `nightVisibility` for why they are no longer unmounted.
+  const skyRef = useRef<Group>(null);
+  const gardenRef = useRef<Group>(null);
+  const streetRef = useRef<Group>(null);
+  const groups = useMemo(() => ({ sky: skyRef, garden: gardenRef, street: streetRef }), []);
+  useNightVisibility(groups);
 
   return (
     <>
@@ -126,28 +142,26 @@ export function NightWorld(): React.ReactElement {
         shadow-camera-far={60}
       />
 
-      {showSky && (
-        <>
-          <Stars />
-          <Moon />
-          <ShootingStars />
-        </>
-      )}
+      <group ref={skyRef}>
+        <Stars />
+        <Moon />
+        <ShootingStars />
+      </group>
       <CloudLayers />
 
       <CityGround />
       <Buildings />
       <Streetlamps />
 
-      {showGarden && (
-        <>
-          <Garden />
-          <Gate />
-          <MusicBox />
-        </>
-      )}
+      <group ref={gardenRef}>
+        <Garden />
+        <Gate />
+        <MusicBox />
+      </group>
 
-      {showStreet && <StudentRow />}
+      <group ref={streetRef}>
+        <StudentRow />
+      </group>
 
       <GroundFog />
       <Fireflies />

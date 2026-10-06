@@ -42,6 +42,8 @@ export interface TextureLibrary {
   /** Five face moods per student. */
   readonly faces: readonly FaceSet[];
   readonly gateSign: Texture;
+  /** Every texture above, flat, for uploading the lot ahead of first use. */
+  readonly all: readonly Texture[];
   dispose(): void;
 }
 
@@ -291,6 +293,7 @@ export async function buildTextureLibrary(
     photos,
     faces,
     gateSign,
+    all,
     dispose: () => {
       for (const t of all) t.dispose();
     },

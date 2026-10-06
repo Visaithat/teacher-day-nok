@@ -25,15 +25,20 @@ import {
   Vector2,
   Vector3,
   type Material,
+  type Texture,
+  type WebGLRenderer,
 } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import type { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { attachModelHeadAnchor, buildBlockyRig } from './blockyRig';
 import { animateStudent, type StudentInstance } from './animateStudent';
 import { buildProps, type PropRig } from '../props/buildProps';
 import { useTextures } from '../../textures/TextureProvider';
 import { mat } from '../../lib/materials';
 import { clamp } from '../../lib/math';
+import { decoded, gltfLoader, stageModel, texturesOf } from '../../lib/modelPipeline';
+import { enqueue, type JobTiming } from '../../lib/gpuQueue';
+import { warmModel } from '../../scenes/prewarm';
+import { NARROW_ASPECT, viewport } from '../../state/viewport';
 import {
   ACTIVE_HOLD_THRESHOLD,
   GATES,
@@ -43,10 +48,11 @@ import {
 } from '../../config/timeline';
 import { STUDENTS, assetUrl, sideFor } from '../../config/students';
 import { useUpdate } from '../../lib/updateBus';
-import { QUALITY } from '../../config/quality';
+import { QUALITY, isMobileDevice } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import { frame as frameState, type FrameState } from '../../state/frame';
 import { dayState } from '../../scenes/dayChars';
+import { nightVis, useNightEdge } from '../../scenes/nightVisibility';
 
 /** How far the sign stands off the chest. */
 const SIGN_OUT = 0.18;
@@ -54,6 +60,15 @@ const SIGN_OUT = 0.18;
 const MODEL_TARGET_H = 3.42;
 /** Distance at which the low-poly model takes over. */
 const LOD_DISTANCE = 26;
+/**
+ * Closer than this along the street, a student's model is about to be the
+ * shot: its uploads stop waiting for a quiet moment and go one per frame.
+ */
+const STAGE_URGENT_DISTANCE = 48;
+/** On a phone, the finale's textures wait until the street is this far along. */
+const DAY_STAGE_FROM = 0.7;
+/** ...and from here the cut is close enough that they stop waiting at all. */
+const DAY_STAGE_URGENT = 0.86;
 
 const scratchWorld = new Vector3();
 const scratchAnchor = new Vector3();
@@ -95,6 +110,7 @@ async function attachFinaleModel(
   loader: GLTFLoader,
   prep: (root: Object3D) => Object3D,
   streetHolder: Object3D,
+  gl: WebGLRenderer,
 ): Promise<void> {
   const day = dayState.chars.find((d) => d.name === c.config.en);
   if (!day || day.rig.model) return;
@@ -107,6 +123,32 @@ async function attachFinaleModel(
       console.warn(`finale model failed for ${c.config.en} — cloning the street mesh`, err);
     }
   }
+  // Its textures are fifteen 2048-square uploads across the class, and left
+  // to first draw they land one student per frame while the finale is
+  // fading in. Where they go up instead depends on the memory there is:
+  //
+  //  - a desktop takes them now, alongside the street's;
+  //  - a phone or tablet holds both sets at once for as short a time as it
+  //    can, so there they wait until the street is most of the way walked;
+  //  - a portrait frame never shows the ring (`DayScene`), so never at all.
+  //
+  // Not awaited. The mesh is attached below either way - the day scene is not
+  // drawn until the cut, so being attached early costs nothing - and if the
+  // uploads have not had their turn by then, three does them on first draw,
+  // which is no worse than it ever was.
+  if (mesh) {
+    const fresh = mesh;
+    const constrained = isMobileDevice();
+    const timing: JobTiming = {
+      when: () =>
+        !constrained || (frameState.p > DAY_STAGE_FROM && viewport.aspect >= NARROW_ASPECT),
+      // Past here the cut is seconds away; get them up while the street
+      // is burning out to white rather than while the faces are coming in.
+      urgent: () => frameState.p > DAY_STAGE_URGENT,
+    };
+    void stageModel(gl, fresh, timing).then(() => warmModel(fresh, 'day'));
+  }
+
   // Raced by the finale's own catch-up loader, or the rig was rebuilt.
   if (day.rig.model) return;
   if (!mesh) {
@@ -137,14 +179,21 @@ async function attachFinaleModel(
  * (a rim and a key at 45°) are shared and moved to whoever is being framed,
  * because only one person is ever in shot.
  *
- * The generated models are fetched lazily: nothing downloads until the camera
- * is well into the descent, and only one at a time, so the request for the
- * student you are about to meet is never queued behind four others.
+ * The generated models are fetched one at a time, in the order they are met,
+ * so the request for the student you are about to meet is never queued behind
+ * four others.
+ *
+ * Built once, with the rest of the night, and hidden outside its stretch of
+ * the street (`nightVisibility`). The figures are a few hundred meshes and
+ * the models several megabytes each; building the one mid-scroll and
+ * re-fetching the other on every pass back up the street was the largest
+ * single hitch in the film.
  */
 export function StudentRow(): React.ReactElement {
   const textures = useTextures();
   const camera = useThree((s) => s.camera);
   const scene = useThree((s) => s.scene);
+  const gl = useThree((s) => s.gl);
   const quality = useUIStore((s) => s.quality);
   const settings = QUALITY[quality];
 
@@ -154,6 +203,8 @@ export function StudentRow(): React.ReactElement {
   const loadedRef = useRef(new Set<string>());
   const busyRef = useRef(false);
   const lodsRef = useRef<LOD[]>([]);
+  /** The detailed meshes' textures: the bulk of the street's GPU memory. */
+  const detailRef = useRef<Texture[]>([]);
   const shadowsRef = useRef(settings.characterShadows);
   shadowsRef.current = settings.characterShadows;
 
@@ -375,7 +426,21 @@ export function StudentRow(): React.ReactElement {
       group.add(label);
 
       // ---- the staged props ---------------------------------------------
-      const props = s.props ? buildProps(s.props, { host: group, easel, side, student: s, textures }) : null;
+      const props = s.props
+        ? buildProps(s.props, {
+            host: group,
+            easel,
+            side,
+            student: s,
+            textures,
+            stage: (model) =>
+              stageModel(gl, model, {
+                urgent: () =>
+                  nightVis.street &&
+                  Math.abs(frameState.cameraZ - group.position.z) < STAGE_URGENT_DISTANCE,
+              }).then(() => warmModel(model, 'night')),
+          })
+        : null;
 
       students.push({
         index: i,
@@ -414,7 +479,7 @@ export function StudentRow(): React.ReactElement {
     });
 
     return { root, students };
-  }, [textures]);
+  }, [textures, gl]);
 
   // Shadow casting is a per-mesh flag: the tier can toggle it on the figures
   // that already exist, loaded models included, without a rebuild.
@@ -434,20 +499,24 @@ export function StudentRow(): React.ReactElement {
       if (!src) return;
       loader.load(
         assetUrl(src),
-        (tex) => {
-          if (cancelled) return;
-          tex.colorSpace = SRGBColorSpace;
-          const target = c.frame.children.find(
-            (o) => (o as Mesh).isMesh && ((o as Mesh).material as MeshStandardMaterial).map,
-          ) as Mesh | undefined;
-          void target;
-          const photoMesh = c.frame.children[3] as Mesh | undefined;
-          if (photoMesh) {
-            const m = photoMesh.material as MeshStandardMaterial;
-            m.map = tex;
-            m.needsUpdate = true;
-          }
-          if (tex.image) c.fitFrame(tex.image.width / tex.image.height);
+        (loaded) => {
+          // Decoded before it is put on the print, so the frame that first
+          // draws it uploads pixels rather than decoding a JPEG.
+          void decoded(loaded).then((tex) => {
+            if (cancelled) return;
+            tex.colorSpace = SRGBColorSpace;
+            const target = c.frame.children.find(
+              (o) => (o as Mesh).isMesh && ((o as Mesh).material as MeshStandardMaterial).map,
+            ) as Mesh | undefined;
+            void target;
+            const photoMesh = c.frame.children[3] as Mesh | undefined;
+            if (photoMesh) {
+              const m = photoMesh.material as MeshStandardMaterial;
+              m.map = tex;
+              m.needsUpdate = true;
+            }
+            if (tex.image) c.fitFrame(tex.image.width / tex.image.height);
+          });
         },
         undefined,
         () => {
@@ -463,8 +532,7 @@ export function StudentRow(): React.ReactElement {
   // ---- the generated models, fetched one at a time ----------------------
   const loadModel = useCallback(
     async (c: StreetStudent): Promise<void> => {
-      const loader = new GLTFLoader();
-      loader.setMeshoptDecoder(MeshoptDecoder);
+      const loader = gltfLoader();
 
       const urls = [c.config.modelUrl, c.config.lodUrl].filter(Boolean).map(assetUrl);
       const gltfs = await Promise.all(urls.map((u) => loader.loadAsync(u)));
@@ -504,18 +572,38 @@ export function StudentRow(): React.ReactElement {
         return root;
       };
 
+      const levels = gltfs.map((g) => prep(g.scene));
+
+      // Everything above was off the main thread or cheap. What is left is
+      // not: three 2048-square textures, the mesh, and a shader - which
+      // three would do all at once on the first frame the model is drawn,
+      // and again for the detailed mesh as the camera closes to
+      // `LOD_DISTANCE`. Instead each piece goes up on its own, when a slow
+      // frame will not show (`gpuQueue`), and the model is only swapped in
+      // once drawing it costs nothing new.
+      const timing: JobTiming = {
+        urgent: () =>
+          nightVis.street &&
+          Math.abs(frameState.cameraZ - c.group.position.z) < STAGE_URGENT_DISTANCE,
+      };
+      // The stand-in first: it is small, and it is the one on screen until
+      // the camera is close.
+      for (const level of [...levels].reverse()) await stageModel(gl, level, timing);
+
       let holder: Object3D;
-      if (gltfs.length > 1 && gltfs[0] && gltfs[1]) {
+      if (levels.length > 1 && levels[0] && levels[1]) {
+        detailRef.current.push(...texturesOf(levels[0]));
         const lod = new LOD();
-        lod.addLevel(prep(gltfs[0].scene), 0);
-        lod.addLevel(prep(gltfs[1].scene), LOD_DISTANCE);
+        lod.addLevel(levels[0], 0);
+        lod.addLevel(levels[1], LOD_DISTANCE);
         lodsRef.current.push(lod);
         holder = lod;
-      } else if (gltfs[0]) {
-        holder = prep(gltfs[0].scene);
+      } else if (levels[0]) {
+        holder = levels[0];
       } else {
         return;
       }
+      await warmModel(holder, 'night');
 
       // Hang it off the hips, so bow, sway and breathing still drive it.
       const wrap = new Group();
@@ -528,14 +616,14 @@ export function StudentRow(): React.ReactElement {
       // in the last few percent of the scroll; starting five more downloads
       // then would mean a ring of blocky stand-ins while they arrived. This
       // way they are attached and waiting minutes before anyone sees them.
-      void attachFinaleModel(c, loader, prep, holder);
+      void attachFinaleModel(c, loader, prep, holder, gl);
 
       for (const mesh of c.rig.bodyMeshes) mesh.visible = false;
       c.rig.torso = wrap;
       c.rig.torsoBase = [1, 1];
       c.rig.model = holder;
     },
-    [],
+    [gl],
   );
 
   // ---- per frame ---------------------------------------------------------
@@ -544,8 +632,9 @@ export function StudentRow(): React.ReactElement {
       const { p, phase, time } = f;
       const active = phase.hold > ACTIVE_HOLD_THRESHOLD ? phase.idx : -1;
 
-      // Queue the next model once the descent is underway.
-      if (p > MOUNT.modelLoadStart && !busyRef.current) {
+      // Queue the next model - long before the street itself is on stage,
+      // which is the point of doing it here, ahead of the early return below.
+      if (p >= MOUNT.modelLoadStart && !busyRef.current) {
         const next = built.students.find(
           (c) => c.config.modelUrl && !loadedRef.current.has(c.config.en) && !c.rig.model,
         );
@@ -565,6 +654,9 @@ export function StudentRow(): React.ReactElement {
             });
         }
       }
+
+      // Off stage: nobody to animate, nothing under the cursor.
+      if (!nightVis.street) return;
 
       for (const lod of lodsRef.current) lod.update(camera);
 
@@ -655,6 +747,62 @@ export function StudentRow(): React.ReactElement {
   );
 
   useUpdate('students', update);
+
+  // Hidden and shown, where it used to be torn down and rebuilt. A rebuild
+  // put every figure back in its rest pose with its attention at zero, and
+  // tearing down left nothing behind to keep reporting a subject; both have
+  // to be done by hand now.
+  const edge = useMemo(
+    () => ({
+      onShow: () => {
+        for (const c of built.students) {
+          c.focus = 0;
+          c.notice = 0;
+          c.headWeight = 0;
+          c.bodyWeight = 0;
+          c.leaving = false;
+          c.arriveAt = undefined;
+          c.leftAt = undefined;
+          c.expression = 'neutral';
+          c.rig.head.rotation.y = 0;
+        }
+      },
+      onHide: () => {
+        frameState.hoverStudent = -1;
+        frameState.subjectOn = false;
+        frameState.dofFocusTarget = 26;
+        if (rimRef.current) rimRef.current.intensity = 0;
+        if (keyRef.current) keyRef.current.intensity = 0;
+      },
+    }),
+    [built],
+  );
+  useNightEdge('street', edge);
+
+  // A phone or tablet cannot afford the street and the finale both at full
+  // size: fifteen 2048-square textures each, some 320 MB a set. The street
+  // used to be freed by being unmounted - which never actually released its
+  // model textures, only orphaned them. Now it is said outright: once the
+  // night is over the detailed textures go, and if the film is scrolled back
+  // they are put back the way they first arrived. The low-poly stand-ins and
+  // every mesh stay, so there is always something to draw in the meantime.
+  // A desktop keeps the lot.
+  const nightEdge = useMemo(
+    () => ({
+      onHide: () => {
+        if (!isMobileDevice()) return;
+        for (const texture of detailRef.current) texture.dispose();
+      },
+      onShow: () => {
+        if (!isMobileDevice()) return;
+        for (const texture of detailRef.current) {
+          void enqueue(() => gl.initTexture(texture), { urgent: () => nightVis.street });
+        }
+      },
+    }),
+    [gl],
+  );
+  useNightEdge('night', nightEdge);
 
   useEffect(() => {
     const key = keyRef.current;

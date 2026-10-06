@@ -10,7 +10,7 @@ import fragmentShader from '../../shaders/fireflies.frag.glsl?raw';
 import { useTextures } from '../../textures/TextureProvider';
 import { GATES } from '../../config/timeline';
 import { makeRandom } from '../../lib/math';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
 import { QUALITY } from '../../config/quality';
 import { useUIStore } from '../../state/useUIStore';
 import type { FrameState } from '../../state/frame';
@@ -75,7 +75,7 @@ export function Fireflies(): React.ReactElement {
     [material],
   );
 
-  useUpdate('world', update);
+  useNightUpdate('night', 'world', update);
 
   return <points geometry={geometry} material={material} frustumCulled={false} />;
 }

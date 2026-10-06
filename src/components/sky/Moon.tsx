@@ -16,7 +16,8 @@ import vertexShader from '../../shaders/moonRim.vert.glsl?raw';
 import fragmentShader from '../../shaders/moonRim.frag.glsl?raw';
 import { useTextures } from '../../textures/TextureProvider';
 import { GATES } from '../../config/timeline';
-import { useUpdate } from '../../lib/updateBus';
+import { useNightUpdate } from '../../scenes/nightVisibility';
+import { decoded } from '../../lib/modelPipeline';
 import type { FrameState } from '../../state/frame';
 
 /** NASA-derived lunar map. The procedural moon stands in until it arrives. */
@@ -60,13 +61,17 @@ export function Moon(): React.ReactElement {
     let cancelled = false;
     new TextureLoader().load(
       MOON_MAP_URL,
-      (tex) => {
-        if (cancelled) return;
-        tex.colorSpace = SRGBColorSpace;
-        tex.anisotropy = 8;
-        bodyMat.map = tex;
-        bodyMat.bumpMap = tex;
-        bodyMat.needsUpdate = true;
+      (loaded) => {
+        // Decoded first: this lands while the camera is coming down past the
+        // moon, and an undecoded image is decoded inside the upload.
+        void decoded(loaded).then((tex) => {
+          if (cancelled) return;
+          tex.colorSpace = SRGBColorSpace;
+          tex.anisotropy = 8;
+          bodyMat.map = tex;
+          bodyMat.bumpMap = tex;
+          bodyMat.needsUpdate = true;
+        });
       },
       undefined,
       () => {
@@ -129,7 +134,7 @@ export function Moon(): React.ReactElement {
     [bodyMat, haloMat, rimMat],
   );
 
-  useUpdate('world', update);
+  useNightUpdate('sky', 'world', update);
 
   return (
     <group position={[-64, 318, -500]}>

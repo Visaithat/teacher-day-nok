@@ -240,8 +240,9 @@ export function buildBlockyRig(student: StudentConfig, options: BuildRigOptions)
     setFace(mood: FaceMood) {
       if (rig.mood === mood) return;
       rig.mood = mood;
+      // No `needsUpdate`: one face for another leaves the program key as it
+      // was, and three reads `map` afresh on every frame it draws the head.
       headM.map = options.faces[mood];
-      headM.needsUpdate = true;
     },
     dispose() {
       grp.traverse((o) => {

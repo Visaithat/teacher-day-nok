@@ -4,6 +4,9 @@ import { useUIStore } from '../state/useUIStore';
 
 const TextureContext = createContext<TextureLibrary | null>(null);
 
+/** How much of the loader's bar is texture generation; the rest is prewarm. */
+export const TEXTURE_SHARE = 0.9;
+
 /**
  * Builds the texture library once and shares it with the whole tree.
  *
@@ -29,8 +32,10 @@ export function TextureProvider({
     let cancelled = false;
     let made: TextureLibrary | null = null;
 
+    // The last tenth of the bar belongs to `prewarmBoot` in `World`, which
+    // runs once this has finished and the scenes exist to be drawn.
     void buildTextureLibrary((f) => {
-      if (!cancelled) setProgress(0.04 + f * 0.96);
+      if (!cancelled) setProgress(0.04 + f * (TEXTURE_SHARE - 0.04));
     })
       .then((lib) => {
         made = lib;

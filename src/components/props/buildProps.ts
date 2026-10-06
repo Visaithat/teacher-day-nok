@@ -21,11 +21,10 @@ import {
   type BufferGeometry,
   type Material,
 } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { surf } from '../students/proportions';
 import { mat } from '../../lib/materials';
 import { makeRandom, clamp } from '../../lib/math';
+import { gltfLoader } from '../../lib/modelPipeline';
 import {
   drawAIPanel,
   drawArtistCanvas,
@@ -50,6 +49,12 @@ export interface PropContext {
   readonly side: -1 | 1;
   readonly student: StudentConfig;
   readonly textures: TextureLibrary;
+  /**
+   * Upload and compile a fetched model before it is shown. The street's to
+   * supply, because it holds the renderer; without it a model goes in as it
+   * arrives and pays for itself on its first frame.
+   */
+  readonly stage?: ((root: Object3D) => Promise<void>) | undefined;
 }
 
 export interface PropRig {
@@ -179,6 +184,7 @@ function addModel(
   place: Placement,
   textures: PropContext['textures'],
   label: string,
+  stage: PropContext['stage'],
 ): PropRig {
   const stand = new Group();
   stand.position.set(place.x, place.y, place.z);
@@ -209,9 +215,7 @@ function addModel(
   const fetchOnce = (): void => {
     if (started) return;
     started = true;
-    const loader = new GLTFLoader();
-    loader.setMeshoptDecoder(MeshoptDecoder);
-    loader
+    gltfLoader()
       .loadAsync(assetUrl(url))
       .then((gltf) => {
         const root = gltf.scene;
@@ -243,7 +247,10 @@ function addModel(
           }
         });
 
-        stand.add(root);
+        // Uploaded and compiled before it is shown, like the figures.
+        return (stage ? stage(root) : Promise.resolve()).then(() => {
+          stand.add(root);
+        });
       })
       .catch((err: unknown) => {
         console.warn(`${label} failed to load (${url}) — the set stands without it`, err);
@@ -291,7 +298,7 @@ const ARTWORK: Placement = {
 };
 
 /** Kengkue: a working easel, spattered, with a stool and a jar of brushes. */
-function artistProps({ host, easel, side, student, textures }: PropContext): PropRig {
+function artistProps({ host, easel, side, student, textures, stage }: PropContext): PropRig {
   const rand = makeRandom(0xa27157);
   const warm = ['#e0632f', '#f0a72c', '#d8b23c', '#c2452f', '#e88a3c', '#f2d06b'] as const;
   const wood = mat('wood', '#7a5836');
@@ -402,7 +409,7 @@ function artistProps({ host, easel, side, student, textures }: PropContext): Pro
   }
 
   const artwork = student.artworkUrl
-    ? addModel(host, student.artworkUrl, ARTWORK, textures, 'artwork')
+    ? addModel(host, student.artworkUrl, ARTWORK, textures, 'artwork', stage)
     : null;
 
   return {
@@ -440,7 +447,7 @@ const DESK_DOLL: Placement = {
 };
 
 /** Vanhxay: a crate desk, an open laptop lighting his face, drifting code. */
-function programmerProps({ host, side, student, textures }: PropContext): PropRig {
+function programmerProps({ host, side, student, textures, stage }: PropContext): PropRig {
   const wood = mat('wood', '#5a4432');
   const dark = surf('leather', '#1e2027');
 
@@ -510,7 +517,7 @@ function programmerProps({ host, side, student, textures }: PropContext): PropRi
   }
 
   const doll = student.dollUrl
-    ? addModel(desk, student.dollUrl, DESK_DOLL, textures, 'desk doll')
+    ? addModel(desk, student.dollUrl, DESK_DOLL, textures, 'desk doll', stage)
     : null;
 
   return {

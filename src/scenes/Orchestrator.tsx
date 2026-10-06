@@ -1,5 +1,5 @@
 import { useFrame } from '@react-three/fiber';
-import { frame } from '../state/frame';
+import { frame, frameDebug } from '../state/frame';
 import { runStages } from '../lib/updateBus';
 import { studentPhase, SCROLL_DAMP, SCROLL_DAMP_REDUCED } from '../config/timeline';
 import { damp } from '../lib/math';
@@ -16,7 +16,7 @@ export function Orchestrator(): null {
     // The source clamped dt to 0.05 so a tab-out could not fling the camera.
     const dt = Math.min(0.05, delta);
     frame.dt = dt;
-    frame.time += dt;
+    frame.time = frameDebug.freezeTime ?? frame.time + dt;
 
     // Frame-rate-independent form of the source's `p += (target - p) * k`.
     const k = frame.reduced ? SCROLL_DAMP_REDUCED : SCROLL_DAMP;

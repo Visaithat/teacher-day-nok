@@ -7,6 +7,7 @@ interface YTPlayer {
   setVolume?: (v: number) => void;
   playVideo?: () => void;
   pauseVideo?: () => void;
+  seekTo?: (seconds: number, allowSeekAhead: boolean) => void;
   mute?: () => void;
   unMute?: () => void;
   destroy?: () => void;
@@ -69,7 +70,7 @@ function loadApi(): Promise<YTNamespace> {
 }
 
 export interface MusicController {
-  /** Start the song. Idempotent. */
+  /** Start the song, or start it again from the top after `stop`. */
   start: () => void;
   /** Mute or unmute the song, independently of the ambient pad. */
   setMuted: (muted: boolean) => void;
@@ -89,6 +90,15 @@ export function useYouTubePlayer(muted: boolean): MusicController {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YTPlayer | null>(null);
   const startedRef = useRef(false);
+  /**
+   * Whether the song should be playing. `stop` clears it, so a player still
+   * loading when Replay is pressed does not start the song on its own later.
+   */
+  const wantRef = useRef(false);
+  /** `stop`'s delayed pause, cancelled if the song is started again first. */
+  const pauseTimerRef = useRef(0);
+  /** Bumped by every fade, so a newer fade stops an older one mid-ramp. */
+  const fadeIdRef = useRef(0);
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
 
@@ -108,9 +118,10 @@ export function useYouTubePlayer(muted: boolean): MusicController {
   /** Ramp the volume rather than cutting it, in both directions. */
   const fadeVolume = useCallback((from: number, to: number, ms: number) => {
     const t0 = performance.now();
+    const id = ++fadeIdRef.current;
     const step = (): void => {
       const player = playerRef.current;
-      if (!player?.setVolume) return;
+      if (!player?.setVolume || id !== fadeIdRef.current) return;
       const k = clamp((performance.now() - t0) / ms, 0, 1);
       if (!mutedRef.current) player.setVolume(Math.round(lerp(from, to, k)));
       if (k < 1) requestAnimationFrame(step);
@@ -119,6 +130,21 @@ export function useYouTubePlayer(muted: boolean): MusicController {
   }, []);
 
   const start = useCallback(() => {
+    wantRef.current = true;
+    window.clearTimeout(pauseTimerRef.current);
+
+    // Again, after Replay. The player is already here and only paused, so it
+    // starts over from the top - the same entrance as the first time.
+    const existing = playerRef.current;
+    if (existing) {
+      existing.seekTo?.(0, true);
+      existing.setVolume?.(0);
+      existing.playVideo?.();
+      fadeVolume(0, YOUTUBE_VOLUME, 3000);
+      return;
+    }
+
+    // Still loading from the first time; `onReady` will play it.
     if (startedRef.current) return;
     startedRef.current = true;
 
@@ -142,6 +168,7 @@ export function useYouTubePlayer(muted: boolean): MusicController {
           events: {
             onReady: (e) => {
               e.target.setVolume?.(0);
+              if (!wantRef.current) return;
               e.target.playVideo?.();
               // Three seconds, so it arrives under the scene rather than on it.
               fadeVolume(0, YOUTUBE_VOLUME, 3000);
@@ -165,9 +192,11 @@ export function useYouTubePlayer(muted: boolean): MusicController {
   }, []);
 
   const stop = useCallback(() => {
+    wantRef.current = false;
     if (!playerRef.current) return;
     fadeVolume(YOUTUBE_VOLUME, 0, 1800);
-    window.setTimeout(() => playerRef.current?.pauseVideo?.(), 1900);
+    window.clearTimeout(pauseTimerRef.current);
+    pauseTimerRef.current = window.setTimeout(() => playerRef.current?.pauseVideo?.(), 1900);
   }, [fadeVolume]);
 
   return { start, setMuted, stop };

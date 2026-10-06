@@ -16,8 +16,6 @@ import {
   SpriteMaterial,
   Vector3,
 } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { attachModelHeadAnchor, buildBlockyRig } from '../components/students/blockyRig';
 import { HIP_Y, P } from '../components/students/proportions';
 import { createPetalField, SpriteField, useFieldPixelScale } from '../components/fx/SpriteField';
@@ -26,6 +24,7 @@ import { STUDENTS, STUDENT_COUNT, assetUrl, wakeGestureFor } from '../config/stu
 import { GATES, WAKE_B } from '../config/timeline';
 import { useUpdate } from '../lib/updateBus';
 import { sstep } from '../lib/math';
+import { gltfLoader } from '../lib/modelPipeline';
 import { QUALITY } from '../config/quality';
 import { useUIStore } from '../state/useUIStore';
 import { DAY_FOV, DAY_FOV_NARROW, NARROW_ASPECT } from '../state/viewport';
@@ -395,8 +394,7 @@ export function DayScene(): React.ReactElement {
 
   // ---- the finale models, loaded during the white-out --------------------
   useEffect(() => {
-    const loader = new GLTFLoader();
-    loader.setMeshoptDecoder(MeshoptDecoder);
+    const loader = gltfLoader();
     let cancelled = false;
 
     const load = async (c: DayChar): Promise<boolean> => {

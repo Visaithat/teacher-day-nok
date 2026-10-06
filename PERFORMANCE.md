@@ -4,12 +4,11 @@ The film is a port of `Teachers Day Film v3.dc.html` — a single 4,178-line
 vanilla-Three.js file. This documents what was slow in the original, what
 changed, and what did not apply.
 
-**Read this first:** the frame-rate table at the bottom is **not filled in by
-me.** The browser I can drive from this environment is network-isolated from
-this machine and cannot reach `localhost` on any port (`ERR_CONNECTION_REFUSED`
-while `curl` on the same box returns 200), so I could not capture traces. Every
-structural number below is measured or counted from the code; the fps figures
-need a human with a browser. Add `?perf` to the URL to get the HUD.
+**Read this first:** sections 1 to 4 are the original port and were written
+from the source, without a browser; their counts are static. Sections 5 and 6
+were measured in one - they are the frame rates, and the account of a second
+pass that removed the hitches the first one left (and, in places, caused).
+Add `?perf` to the URL to get the HUD.
 
 ---
 
@@ -86,7 +85,9 @@ Every character ran its full animation every frame regardless of range, and
 `camAt` rescanned all 88 keyframes from index 0 every frame.
 
 **Fixed by:** the camera solver caches its segment index (normally zero
-iterations); scene subsystems unmount outside their scroll window.
+iterations); scene subsystems are hidden, and their updates stopped, outside
+their scroll window (see 2.4 - they were unmounted at first, which turned out
+to be the largest source of hitches in the port).
 
 ---
 
@@ -152,28 +153,37 @@ the draw calls.
 
 ### 2.4 Scene lifetime
 
-Subsystems mount only inside their scroll window (`config/timeline.ts`,
-`MOUNT`), via `useScrollWindow`, which re-renders only on the two frames where
-the window actually flips:
+Everything is built once, behind the loader. Parts of the night that are out
+of shot are hidden - `visible = false` on their group, per-frame updates
+stopped - inside the windows in `config/timeline.ts` (`MOUNT`), driven by
+`scenes/nightVisibility.ts`:
 
-| Subsystem | Window |
+| Part | On stage |
 |---|---|
-| Gift box | until the lid opens, then dropped for good |
+| Gift box | until the lid opens, then unmounted for good |
 | Sky (11,000 stars, 160-segment moon) | `p < 0.62` |
 | Garden, gate, music box | `p < 0.70` |
 | Students | `0.44 < p < 0.90` |
-| Night world | `p < 0.92` |
-| Day scene | always mounted — five rigs and a dome, and its seats must exist before the street starts fetching finale meshes into them |
+| Night world (updates) | `p < 0.92` |
+| Day scene | always mounted, drawn from `p >= 0.903` |
+
+These were mount windows in the first version of the port: each part was
+built when the scroll reached it and torn down when it left. Section 6 is the
+account of why that was replaced.
 
 ### 2.5 Model loading
 
-- Nothing downloads until `p > 0.3`, and then **one model at a time**, so the
-  student about to be met is never queued behind four others.
-- `THREE.LOD` swaps the 16k-triangle mesh in past 26 units.
+- Downloads start as soon as the loader lifts, **one student at a time**, so the student
+  about to be met is never queued behind four others.
+- Geometry is decompressed in two module workers (`lib/meshoptWorker.ts`).
+- Each model is uploaded and compiled *before* it is swapped in, one texture
+  at a time, at moments a slow frame does not show (`lib/gpuQueue.ts`,
+  `lib/modelPipeline.ts`).
+- `THREE.LOD` swaps the 16k-triangle mesh in past 26 units. The detailed
+  mesh's textures are already on the GPU by then, so the swap uploads nothing.
 - Finale meshes ride the street queue: each is fetched straight after that
-  student's street model, as the source does. `DayScene` keeps a catch-up
-  loader for anyone still unattached at `p ≥ 0.86`, which is late enough not to
-  compete with the street for bandwidth.
+  student's street model. `DayScene` keeps a catch-up loader for anyone still
+  unattached at `p >= 0.86`.
 - A failed load leaves the built blocky figure in place and logs a warning; the
   film never blocks on the network.
 
@@ -193,7 +203,9 @@ Drei's `<PerformanceMonitor>` walks a three-tier ladder (`config/quality.ts`)
 scaling DPR, star count (11,000 / 6,000 / 3,400), flower and grass density,
 firefly and petal counts, shadows, character shadows, bloom resolution and
 depth of field. It moves one step at a time with a two-second settle, so
-quality never visibly pumps.
+quality never visibly pumps, and after three changes it stops and holds the low
+tier. (Until section 6.4 the low tier only zeroed depth of field's aperture
+and still ran the pass, and until section 6.5 the changes were miscounted.)
 
 ---
 
@@ -440,21 +452,210 @@ Unreachable in the source; noted so nothing looks lost.
 
 ---
 
-## 5. Frame rates — to be filled in
+## 5. Frame rates
 
-Run `npm run dev`, open with `?perf`, and record from the HUD. The three
-segments that matter:
+Measured, not estimated - see section 6 for how, and for what changed between
+the two columns. One laptop (AMD Radeon 860M, integrated, 120 Hz panel), Chrome 153, a 1587x807
+window at device pixel ratio 2, production build served by `vite preview`. The film is
+played start to end in 60 seconds with one mouse-wheel notch at a time, and
+never stops, which is the worst case for anything that hides work in a pause.
 
-| Segment | `p` | Before | After | Draw calls | Triangles |
-|---|---|---|---|---|---|
-| Boot (first interactive frame) | — | | | | |
-| Descent | 0.30 – 0.50 | | | | |
-| Street | 0.52 – 0.84 | | | | |
-| Finale | 0.94 – 1.00 | | | | |
+"Before" is the port as it stood (commit `bc81af8`); "after" is section 6.
+High tier is what a desktop starts on, low is what a phone or tablet does.
 
-Targets: a stable 60 fps on a mid-range laptop, 30+ on mobile, no forced
-reflow in the steady state, and no long task over 50 ms after first paint.
+| Tier | Segment | `p` | Mean frame before | after | Worst frame before | after |
+|---|---|---|---:|---:|---:|---:|
+| high | Sky and title | 0 - 0.30 | 15.1 ms | 10.4 ms | 135 ms | 74 ms |
+| high | Descent, garden, gate | 0.30 - 0.50 | 47.8 ms | 32.2 ms | 901 ms | 75 ms |
+| high | Street | 0.50 - 0.90 | 29.0 ms | 23.6 ms | 438 ms | 78 ms |
+| high | Finale | 0.90 - 1 | 16.6 ms | 11.8 ms | 191 ms | 51 ms |
+| low | Sky and title | 0 - 0.30 | 9.7 ms | 9.3 ms | 50 ms | 63 ms |
+| low | Descent, garden, gate | 0.30 - 0.50 | 20.6 ms | 16.8 ms | 503 ms | 46 ms |
+| low | Street | 0.50 - 0.90 | 14.2 ms | 11.5 ms | 209 ms | 41 ms |
+| low | Finale | 0.90 - 1 | 9.9 ms | 8.7 ms | 117 ms | 24 ms |
 
-To compare against the original, serve
-`Downloads/For-Teacher-Nok/Teachers Day Film v3.dc.html` alongside its
-`config/` and `uploads/` folders and profile the same four segments.
+| Tier | | Frames over 50 ms | Frames over 100 ms | Loader |
+|---|---|---:|---:|---:|
+| high | before | 80 - 149 | 17 - 28 | 1.8 - 1.9 s |
+| high | after | 9 - 29 | 0 | 2.8 - 3.1 s |
+| low | before | 28 | 10 | 1.3 s |
+| low | after | 1 - 2 | 0 | 2.6 s |
+
+High tier: three runs of the old build and four of the new, alternated. Low
+tier: one run of the old and two of the new. Means are averaged over the runs;
+worst frames are the worst of any run. Each run is about 3,000 to 6,000 frames.
+
+What the numbers do not say: the high tier is still GPU-bound through the
+gate and the street on this machine (30 to 40 fps at this size). That is the
+picture itself - every light, the lantern glass, bloom at full strength - and
+the brief for section 6 was that the picture does not change. The quality
+ladder is what handles a GPU that cannot keep up; what was removed is
+everything that stopped the frame outright. No phone or tablet has been
+measured: the low-tier rows are a desktop GPU running the phone's settings,
+which shows the hitches are gone but says nothing about a phone's frame rate.
+
+---
+
+## 6. Hitches: the second pass
+
+The report was that the film stuttered whenever the camera moved and froze
+for a moment every so often, on phones, tablets and desktops alike. The
+constraint was that the picture must not change: no effect, light, texture
+size or resolution traded away.
+
+Measuring the port as it stood (the "before" columns above) gave one long
+frame after another, each landing on the same scroll position in every run:
+
+| `p` | Frame | What landed on it |
+|---|---:|---|
+| 0.441 | 0.4 - 4.8 s | the street mounting: five rigs built, 18 shader programs compiled, 35 textures uploaded |
+| 0.621 | 0.2 - 3.0 s | the sky unmounting; every lit material recompiled for two fewer lights |
+| 0.701 | 0.2 - 1.8 s | the garden and gate unmounting; recompiled again for ten fewer |
+| 0.52 - 0.79 | 0.1 - 0.25 s, five times | each student's model: three 2048-square textures at once, on the frame the detailed mesh was first drawn |
+| 0.606, 0.664, 0.793 | 0.1 - 0.23 s | each student's letter being fitted to its card: eight layouts in one frame |
+| 0.900 - 0.931 | 0.1 - 0.57 s, six times | the street unmounting, the day scene compiling, then one finale model uploading per frame as the faces came in |
+
+Almost none of that is the film being expensive to draw. It is work being
+done at the wrong moment, and nearly all of it was created by an earlier
+optimisation - unmounting whatever was out of shot (2.4, as first written).
+
+### 6.1 Build once, hide, never unmount
+
+`scenes/nightVisibility.ts`. The sky, the garden and the street are built at
+boot and hidden outside their windows. three does not draw an invisible
+subtree or count its lights, their per-frame updates are gated on the same
+flag (`useNightUpdate`), and `park()` stops the matrix walk into them, so
+hidden costs what unmounted did. State that used to be reset by being rebuilt
+is reset on the show/hide edge instead (`useNightEdge`).
+
+This also closed a leak. Unmounting the street disposed the rigs but never the
+models' textures, so scrolling back up fetched, decoded and uploaded all five
+again on top of the first set. Scrolling back, and Replay, now cost nothing.
+
+### 6.2 Prewarm behind the loader
+
+`scenes/prewarm.ts`. Which lights are on is baked into every lit material's
+shader, so each combination of sky, garden and street is a different program
+for everything in view. Before the loader lifts, the film is drawn once in
+each of the five combinations it passes through, then the finale, then the
+gift box - culling off, through the real post chain, twice each. That
+compiles every program, uploads every texture and buffer and allocates every
+render target while nothing can be seen. `window.__perfLog.long` is the
+check: in the runs behind section 5, none of the new build's 25 longest frames
+in either direction had a program or a texture created on it. In the old
+build most of them did.
+
+It costs a little over a second of loader on the test machine. When the
+quality ladder turns shadows on or off, every lit program's key changes again;
+the combinations are then re-drawn off screen, one per `gpuQueue` job.
+
+### 6.3 Models arrive without a dropped frame
+
+`lib/modelPipeline.ts`, `lib/gpuQueue.ts`, `lib/meshoptWorker.ts`.
+
+- Geometry is decompressed in workers. (three's own `useWorkers` builds its
+  worker by stringifying functions and referring to them by name, which does
+  not survive minification - it starts a worker that dies on its first
+  message. This one is a real module worker.)
+- A 2048-square texture upload is one synchronous call of 20 - 45 ms on the
+  test machine and cannot be split. So each is a job in a queue, and the
+  renderer runs jobs where a slow frame does not show: under the white-out,
+  while the camera is at rest, or - for someone who never stops scrolling -
+  one at a time, well apart. Downloads start as the loader lifts, so most of
+  it happens on the gift box, which is a nearly still frame waiting on a click.
+- A model is swapped in only after its textures and buffers are up and its
+  shaders compiled for every stage combination it will be seen in.
+- The finale's fifteen textures go up ahead of the cut instead of during it.
+  On a phone or tablet they wait until the street is mostly walked, and the
+  street's own detailed textures are released once the night is over, so the
+  two sets overlap as briefly as possible. A portrait frame never shows the
+  ring and never uploads them.
+
+### 6.4 Work that changed nothing
+
+- **The bokeh pass at zero aperture.** It re-rendered the whole scene for
+  depth and took 41 samples per pixel, to blur by nothing - for all of the
+  film outside `0.52 < p < 0.88`, and on the low tier everywhere. It is now
+  replaced, whenever the aperture is zero, by a one-sample copy that sets
+  alpha to 1. The alpha matters and is why the pass cannot simply be skipped:
+  additive sprites push alpha past 1 in the half-float buffer, and bloom
+  weights itself by the alpha it is given.
+- **Shadow maps for dark lights**, and a second copy of every shadow map each
+  frame from the bokeh pass's own depth render.
+- **The letter fit.** Solved one layout per frame while the card is face
+  down, and cached per letter and card size.
+
+### 6.5 The quality ladder stopped punishing a smooth frame rate
+
+`PerfTools.tsx`. The ladder was configured with drei's `flipflops={3}` and a
+fallback to the low tier. drei counts every incline and every decline it
+reports toward that limit, including the ones that change nothing - and a
+machine holding its refresh rate on the top tier "inclines" every 2.5 seconds.
+Four of those, ten seconds of running well, and the film dropped to the lowest
+tier for good, with a rebuild as it went.
+
+It mattered here because of the rest of this section: with the bokeh waste
+gone the sky runs fast enough on the test machine to trip it, where before it
+did not, and the film fell to low about ten seconds in. The limit is now
+kept on tier changes that were actually made. On the test machine the ladder
+then does what it did before - steps down twice as the camera reaches the gate,
+where this GPU cannot hold the top tier - and on a machine that can hold it, it
+stays there. That last part is a change in behaviour: such a machine used to
+end up on low regardless.
+
+### 6.6 Checking that the picture did not change
+
+`?perf` exposes `window.__frameDebug.freezeTime`, which pins the film's clock
+while the damped values still settle. With the clock pinned and the quality
+tier held (`?perf&tier=high`), the canvas was captured at eleven scroll
+positions from each build and compared channel by channel.
+
+On the low tier the baseline reproduces itself exactly - not one pixel differs
+between two captures of it at ten of the eleven positions (the eleventh has a
+shooting star in it, which runs on its own clock). Against that:
+
+- at nine positions no channel of any pixel differs by more than 2 levels in
+  255, and by 2 on under 0.002% of pixels; 4 - 11% of pixels differ by 1;
+- at `p = 0.93`, where the bokeh pass still runs in both builds, the captures
+  are identical;
+- at `p = 0.89`, the over-exposed frame just before the white-out, the largest
+  difference is 4 levels, and 3.4% of pixels differ by 2 or more.
+
+The difference is the old bokeh pass's own rounding. Averaging 41 samples of
+one value does not return that value exactly on this GPU; the copy that
+replaced it does. Where both builds run the real pass there is no difference
+at all, and at 0.89 the same error is multiplied by an exposure of about 8.
+
+The high tier agrees (largest difference 3 levels, 7 at `p = 0.89`) except at
+three street positions where a few hundred scattered pixels differ by much
+more - and there two captures of the baseline differ from each other on more
+pixels than the new build differs from either, so those positions say nothing
+about the change. What makes the baseline unstable there was not tracked down.
+
+### 6.7 Measuring it yourself
+
+- `?perf` - the HUD, plus `window.__perfLog`: every frame's duration, the long
+  ones with their scroll position and how many programs and textures were
+  created on them.
+- `?perf=log` - the log without the HUD, whose own drawing is otherwise in
+  every frame it measures.
+- `?perf&tier=low` - holds one quality tier. The ladder moves with the frame
+  rate, so without this two runs of one build are not comparable.
+
+### 6.8 Looked at and left alone
+
+- **The CSS layers over the canvas** - the multiplied vignette, the grain, the
+  backdrop blurs. Each is a full-screen blend on top of WebGL at the device's
+  full pixel ratio, and on a phone that may well be a real cost. Removing the
+  blend mode changes the corners by about one percent, so it is outside this
+  pass; it is the first thing to try if a phone still struggles.
+- **The lantern glass.** `transmission` makes three render every opaque object
+  a second time into a multisampled buffer while the gate is in view.
+- **Lights at zero intensity.** A dark light still costs its BRDF per
+  fragment. Hiding them would be pixel-identical and would need a program per
+  extra combination.
+- **The scroll's feel.** Lenis eases the wheel and the camera then damps
+  toward it, about 0.3 s between them. That is latency, not dropped frames,
+  and it is the film's pacing as authored.
+- **One animation-frame loop instead of two.** Checked: GSAP's ticker already
+  steps the scroll before R3F renders, on every frame sampled.
