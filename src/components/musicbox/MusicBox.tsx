@@ -100,6 +100,9 @@ export function MusicBox(): React.ReactElement {
     const el = document.createElement('div');
     el.className = 'mb-hint';
     const pill = document.createElement('span');
+    // The pill is a tap target in its own right (see `.mb-hint` and the
+    // stage's click handler), so it gets the 44px catcher the corner chips use.
+    pill.className = 'tap-target';
     pill.textContent = prompt('musicHint', readViewport().coarse);
     const stalk = document.createElement('span');
     el.append(pill, stalk);
@@ -184,6 +187,9 @@ export function MusicBox(): React.ReactElement {
         scratchProject.project(camera);
         const visible = near > 0.05 && !open && scratchProject.z < 1;
         setOpacity(el, visible ? near : 0);
+        // Only a pill that can be seen may take a tap: an invisible one would
+        // still sit over the garden, swallowing taps meant for the box.
+        setStyle(el, 'pointerEvents', visible ? 'auto' : 'none');
         if (visible) {
           // One `transform`, not `left`/`top`: those are layout properties,
           // and this is written on every frame the camera moves. The second

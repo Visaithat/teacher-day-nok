@@ -237,6 +237,10 @@ html.stepped .stage {
   gap: 8px;
   transform: translate(-50%, -100%);
   opacity: 0;
+  /* Flipped to `auto` by the music box's loop while the pill is showing, so a
+     tap on the pill opens the box. On a phone the pill is what people aim
+     for - it says "Tap to play music" and floats a thumb's width above a
+     60px box - and with the pill inert that tap fell on empty sky. */
   pointer-events: none;
   will-change: transform, opacity;
 }
@@ -244,6 +248,7 @@ html.stepped .stage {
 .mb-hint > span:first-child {
   max-width: min(70vw, 260px);
   text-align: center;
+  cursor: pointer;
   border: 1px solid rgba(255, 196, 120, 0.4);
   border-radius: 999px;
   background: rgba(24, 15, 8, 0.55);

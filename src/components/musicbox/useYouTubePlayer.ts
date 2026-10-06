@@ -70,6 +70,15 @@ function loadApi(): Promise<YTNamespace> {
 }
 
 export interface MusicController {
+  /**
+   * Load the player ahead of time, cued and silent.
+   *
+   * A phone's browser lets a YouTube iframe play only when `playVideo` is
+   * called from inside the tap, and a player created on that tap is not ready
+   * for seconds - so `start` would miss the gesture and the song would never
+   * come. Prepared early, `start` plays an existing player synchronously.
+   */
+  prepare: () => void;
   /** Start the song, or start it again from the top after `stop`. */
   start: () => void;
   /** Mute or unmute the song, independently of the ambient pad. */
@@ -81,10 +90,11 @@ export interface MusicController {
 /**
  * The class's chosen song, played through a hidden YouTube iframe.
  *
- * Nothing is fetched until the music box is actually opened — the API script,
- * the player and the video all load on that click. If any of it is blocked
- * the film simply keeps the ambient pad and never mentions it; the scroll is
- * never allowed to wait on this.
+ * On a desktop nothing is fetched until the music box is actually opened —
+ * the API script, the player and the video all load on that click. A touch
+ * screen loads the player at the gift instead (see `prepare`). If any of it
+ * is blocked the film simply keeps the ambient pad and never mentions it; the
+ * scroll is never allowed to wait on this.
  */
 export function useYouTubePlayer(muted: boolean): MusicController {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -95,6 +105,10 @@ export function useYouTubePlayer(muted: boolean): MusicController {
    * loading when Replay is pressed does not start the song on its own later.
    */
   const wantRef = useRef(false);
+  /** The player has fired `onReady`; until then `playVideo` is ignored. */
+  const readyRef = useRef(false);
+  /** The song has played at least once, so a restart has to rewind first. */
+  const playedRef = useRef(false);
   /** `stop`'s delayed pause, cancelled if the song is started again first. */
   const pauseTimerRef = useRef(0);
   /** Bumped by every fade, so a newer fade stops an older one mid-ramp. */
@@ -129,22 +143,8 @@ export function useYouTubePlayer(muted: boolean): MusicController {
     requestAnimationFrame(step);
   }, []);
 
-  const start = useCallback(() => {
-    wantRef.current = true;
-    window.clearTimeout(pauseTimerRef.current);
-
-    // Again, after Replay. The player is already here and only paused, so it
-    // starts over from the top - the same entrance as the first time.
-    const existing = playerRef.current;
-    if (existing) {
-      existing.seekTo?.(0, true);
-      existing.setVolume?.(0);
-      existing.playVideo?.();
-      fadeVolume(0, YOUTUBE_VOLUME, 3000);
-      return;
-    }
-
-    // Still loading from the first time; `onReady` will play it.
+  /** Fetch the API and build the player, once. Plays on ready only if wanted. */
+  const createPlayer = useCallback(() => {
     if (startedRef.current) return;
     startedRef.current = true;
 
@@ -158,7 +158,9 @@ export function useYouTubePlayer(muted: boolean): MusicController {
         playerRef.current = new YT.Player(node, {
           videoId: YOUTUBE_VIDEO_ID,
           playerVars: {
-            autoplay: 1,
+            // Cued, not autoplaying: a prepared player must stay silent until
+            // the box is opened. `onReady` below plays it when it is wanted.
+            autoplay: 0,
             controls: 0,
             playsinline: 1,
             loop: 1,
@@ -167,8 +169,10 @@ export function useYouTubePlayer(muted: boolean): MusicController {
           },
           events: {
             onReady: (e) => {
+              readyRef.current = true;
               e.target.setVolume?.(0);
               if (!wantRef.current) return;
+              playedRef.current = true;
               e.target.playVideo?.();
               // Three seconds, so it arrives under the scene rather than on it.
               fadeVolume(0, YOUTUBE_VOLUME, 3000);
@@ -180,6 +184,27 @@ export function useYouTubePlayer(muted: boolean): MusicController {
         console.warn('YouTube player unavailable — ambient pad only', err);
       });
   }, [fadeVolume]);
+
+  const start = useCallback(() => {
+    wantRef.current = true;
+    window.clearTimeout(pauseTimerRef.current);
+
+    // A ready player is played right here, inside whatever tap called this -
+    // the only place a phone will honour it. That is the prepared player on a
+    // touch screen, and after Replay on anything: paused, so rewound first.
+    const player = playerRef.current;
+    if (player && readyRef.current) {
+      if (playedRef.current) player.seekTo?.(0, true);
+      playedRef.current = true;
+      player.setVolume?.(0);
+      player.playVideo?.();
+      fadeVolume(0, YOUTUBE_VOLUME, 3000);
+      return;
+    }
+
+    // Not built yet, or built and still loading: `onReady` will play it.
+    createPlayer();
+  }, [createPlayer, fadeVolume]);
 
   const setMuted = useCallback((next: boolean) => {
     const player = playerRef.current;
@@ -199,5 +224,5 @@ export function useYouTubePlayer(muted: boolean): MusicController {
     pauseTimerRef.current = window.setTimeout(() => playerRef.current?.pauseVideo?.(), 1900);
   }, [fadeVolume]);
 
-  return { start, setMuted, stop };
+  return { prepare: createPlayer, start, setMuted, stop };
 }

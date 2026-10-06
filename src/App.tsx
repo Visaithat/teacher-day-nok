@@ -26,6 +26,7 @@ import { useLenisScroll } from './hooks/useLenisScroll';
 import { useReducedMotion } from './hooks/useReducedMotion';
 import { usePointerTracking } from './hooks/usePointerTracking';
 import { useStepNav } from './hooks/useStepNav';
+import { readViewport } from './hooks/useViewport';
 import { useOverlayPreload } from './hooks/useOverlayPreload';
 import { useYouTubePlayer } from './components/musicbox/useYouTubePlayer';
 import { musicBoxHit } from './components/musicbox/musicBoxHit';
@@ -75,8 +76,12 @@ export default function App(): React.ReactElement {
     frame.opened = true;
     frame.openedAt = frame.time;
     filmAudio.start();
+    // A phone's browser plays the song only if `playVideo` is called inside
+    // the tap itself, and the player takes seconds to load - so on a touch
+    // screen it is loaded now, cued and silent, while the lid is opening.
+    if (readViewport().touch) music.prepare();
     setOpened(true);
-  }, [setOpened, setPendingOpen]);
+  }, [music, setOpened, setPendingOpen]);
 
   const openMusicBox = useCallback(() => {
     if (frame.musicBoxOpen) return;
@@ -96,7 +101,9 @@ export default function App(): React.ReactElement {
       }
       // The tail of a swipe on a touch screen, not a tap on the music box.
       if (swipedJustNow()) return;
-      if (frame.hoverMusicBox) {
+      // The "Tap to play music" pill floats above the box, and on a phone it
+      // is what people tap: it counts as the box.
+      if (frame.hoverMusicBox || (e.target as Element | null)?.closest?.('.mb-hint')) {
         openMusicBox();
         return;
       }
